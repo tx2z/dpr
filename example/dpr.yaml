@@ -1,0 +1,28 @@
+name: "Example Project"
+columns: auto
+logs: true
+logsDir: ~/.dpr/logs
+
+services:
+  - id: api
+    name: "API Server"
+    start: "echo 'Starting API...' && sleep 1 && echo 'API ready!' && while true; do echo 'API heartbeat'; sleep 5; done"
+    autostart: true
+    color: green
+    readyPattern: "API ready!"
+
+  - id: web
+    name: "Web Server"
+    start: "echo 'Starting Web...' && sleep 1 && echo 'Web ready!' && while true; do echo 'Web heartbeat'; sleep 5; done"
+    autostart: true
+    color: blue
+    readyPattern: "Web ready!"
+    dependsOn:
+      - api
+
+  - id: worker
+    name: "Background Worker"
+    start: "echo 'Starting Worker...' && sleep 1 && echo 'Worker ready!' && while true; do echo 'Worker processing...'; sleep 3; done"
+    autostart: false
+    color: yellow
+    readyPattern: "Worker ready!"

@@ -1,0 +1,197 @@
+# dpr (Dev Process Runner)
+
+A terminal-based UI application for managing multiple development services simultaneously.
+
+## Features
+
+- Run and monitor multiple services in a single terminal
+- Automatic service dependency management
+- Real-time log viewing with search functionality
+- Service auto-start with dependency resolution
+- Vim-style keyboard navigation
+- Optional log persistence to files
+
+## Installation
+
+```bash
+npm install
+npm run build
+```
+
+## Usage
+
+```bash
+# Run with default config (./dpr.yaml)
+node dist/src/index.js
+
+# Run with custom config
+node dist/src/index.js --config path/to/config.yaml
+
+# Validate config without running
+node dist/src/index.js --validate
+
+# Show help
+node dist/src/index.js --help
+```
+
+## Configuration
+
+Create a `dpr.yaml` file in your project root:
+
+```yaml
+name: "My Project"
+columns: auto  # or 1, 2, 3
+logs: true     # enable log persistence
+logsDir: ~/.dpr/logs
+
+services:
+  - id: api
+    name: "API Server"
+    dir: ./api
+    start: npm run dev
+    stop: npm run stop  # optional graceful stop command
+    autostart: true
+    color: green
+    readyPattern: "listening on port"
+    dependsOn: []
+
+  - id: web
+    name: "Web Frontend"
+    dir: ./web
+    start: npm run dev
+    autostart: true
+    color: blue
+    dependsOn:
+      - api
+```
+
+### Global Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | string | null | Project name displayed in header |
+| `columns` | number \| "auto" | "auto" | Number of columns for service panels |
+| `logs` | boolean | false | Enable log persistence for all services |
+| `logsDir` | string | "~/.dpr/logs" | Directory for log files |
+
+### Service Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | string | (required) | Unique service identifier |
+| `name` | string | id | Display name for the service |
+| `dir` | string | "." | Working directory |
+| `start` | string | (required) | Start command |
+| `stop` | string | null | Graceful stop command |
+| `autostart` | boolean | false | Start automatically on launch |
+| `color` | string | (auto) | Panel border color |
+| `logs` | boolean | global.logs | Enable log persistence |
+| `env` | object | {} | Environment variables |
+| `dependsOn` | string[] | [] | Service dependencies |
+| `readyPattern` | string | null | Regex pattern to detect ready state |
+| `readyDelay` | number | 500 | Delay after first output before ready |
+
+### Colors
+
+Available colors: `green`, `blue`, `yellow`, `magenta`, `cyan`, `red`
+
+## Keyboard Shortcuts
+
+### Normal Mode
+
+| Key | Action |
+|-----|--------|
+| `q` / `Ctrl+C` | Quit application |
+| `/` | Enter command mode |
+| `?` | Enter search mode |
+| `1-6` | Focus service panel by number |
+| `Tab` / `Shift+Tab` | Cycle through panels |
+| `Escape` | Clear panel focus |
+| `j` / `Down Arrow` | Scroll logs down |
+| `k` / `Up Arrow` | Scroll logs up |
+| `g` | Scroll to top |
+| `G` | Scroll to bottom |
+
+### Command Mode
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Execute command |
+| `Escape` | Cancel command |
+| `Backspace` | Delete character |
+
+### Search Mode
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Down Arrow` | Next match |
+| `Shift+Tab` / `Up Arrow` | Previous match |
+| `Enter` | Confirm search |
+| `Escape` | Cancel search |
+
+## Commands
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/start <service>` | `/s` | Start a service |
+| `/stop <service>` | `/x` | Stop a service gracefully |
+| `/kill <service>` | `/k` | Force kill a service |
+| `/restart <service>` | `/r` | Restart a service |
+| `/start-all` | `/sa` | Start all services |
+| `/stop-all` | `/xa` | Stop all services |
+| `/clear <service>` | `/c` | Clear service logs |
+| `/focus <service>` | `/f` | Focus service panel |
+| `/quit` | `/q` | Stop all and exit |
+| `/help` | `/h`, `/?` | Show help |
+
+Services can be referenced by number (1-6), ID, or name.
+
+## Service States
+
+| State | Description |
+|-------|-------------|
+| STOPPED | Service is not running |
+| WAITING | Waiting for dependencies to become ready |
+| STARTING | Service process has started |
+| READY | Service is ready (matched readyPattern or delay elapsed) |
+| STOPPING | Service is being stopped |
+| CRASHED | Service exited unexpectedly |
+
+## Dependencies
+
+Services can depend on other services using `dependsOn`. A service will wait until all its dependencies are in the READY state before starting.
+
+Circular dependencies are detected and will cause validation to fail.
+
+## Log Persistence
+
+When `logs: true` is set (globally or per-service), logs are written to files in the configured `logsDir`. Each service gets its own log file named `<service-id>.log`.
+
+Log format:
+```
+[2024-01-15T10:30:00.000Z] Server started on port 3000
+[2024-01-15T10:30:01.000Z] [ERR] Warning: deprecated API used
+```
+
+## Development
+
+```bash
+# Run in development mode
+npm run dev
+
+# Type checking
+npm run typecheck
+
+# Linting
+npm run lint
+
+# Run tests
+npm test
+
+# Build
+npm run build
+```
+
+## License
+
+MIT
