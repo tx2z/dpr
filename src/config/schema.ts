@@ -18,7 +18,10 @@ const serviceSchema = z.object({
   id: z
     .string()
     .min(1, 'Service ID is required')
-    .regex(/^[\w-]+$/, 'Service ID must contain only alphanumeric characters, underscores, or hyphens'),
+    .regex(
+      /^[\w-]+$/,
+      'Service ID must contain only alphanumeric characters, underscores, or hyphens',
+    ),
   name: z.string().optional(),
   dir: z.string().optional(),
   start: z.string().min(1, 'Start command is required'),
@@ -30,12 +33,11 @@ const serviceSchema = z.object({
   dependsOn: z.array(z.string()).default([]),
   readyPattern: z.string().optional(),
   readyDelay: z.number().positive().default(DEFAULT_READY_DELAY),
+  runOnce: z.boolean().default(false),
+  keepRunning: z.boolean().default(false),
 });
 
-const columnsSchema = z.union([
-  z.number().int().positive().max(MAX_SERVICES),
-  z.literal('auto'),
-]);
+const columnsSchema = z.union([z.number().int().positive().max(MAX_SERVICES), z.literal('auto')]);
 
 const configSchema = z
   .object({

@@ -96,11 +96,7 @@ function handleReadyPattern(
   return false;
 }
 
-function setupReadyTimeout(
-  emitter: EventEmitter,
-  state: ProcessState,
-  readyDelay: number,
-): void {
+function setupReadyTimeout(emitter: EventEmitter, state: ProcessState, readyDelay: number): void {
   if (state.readyTimeout !== null) {
     return;
   }
@@ -119,7 +115,10 @@ function handleStdout(
   readyPattern: RegExp | null,
   readyDelay: number,
 ): void {
-  const lines = data.toString().split('\n').filter((line) => line.length > 0);
+  const lines = data
+    .toString()
+    .split('\n')
+    .filter((line) => line.length > 0);
   for (const line of lines) {
     emitter.emit('log', createLogLine(line, 'stdout'));
     const matched = handleReadyPattern(emitter, state, line, readyPattern);
@@ -130,7 +129,10 @@ function handleStdout(
 }
 
 function handleStderr(emitter: EventEmitter, data: Buffer): void {
-  const lines = data.toString().split('\n').filter((line) => line.length > 0);
+  const lines = data
+    .toString()
+    .split('\n')
+    .filter((line) => line.length > 0);
   for (const line of lines) {
     emitter.emit('log', createLogLine(line, 'stderr'));
   }
@@ -140,6 +142,7 @@ function handleProcessExit(
   emitter: EventEmitter,
   state: ProcessState,
   code: number | null,
+  runOnce: boolean,
 ): void {
   clearAllTimeouts(state);
   state.process = null;
@@ -149,6 +152,14 @@ function handleProcessExit(
     emitStatus(emitter, state, 'stopped', code);
     return;
   }
+
+  // For runOnce services, exit code 0 means success -> ready
+  if (runOnce && code === 0) {
+    emitStatus(emitter, state, 'ready', code);
+    emitter.emit('ready');
+    return;
+  }
+
   emitStatus(emitter, state, 'crashed', code);
 }
 
@@ -169,6 +180,7 @@ function startProcess(config: ServiceConfig, emitter: EventEmitter, state: Proce
 
   const readyPattern = config.readyPattern !== null ? new RegExp(config.readyPattern) : null;
   const readyDelay = config.readyDelay;
+  const runOnce = config.runOnce;
 
   const child = spawn(config.start, {
     cwd: config.dir,
@@ -189,7 +201,7 @@ function startProcess(config: ServiceConfig, emitter: EventEmitter, state: Proce
   });
 
   child.on('exit', (code) => {
-    handleProcessExit(emitter, state, code);
+    handleProcessExit(emitter, state, code, runOnce);
   });
 
   child.on('error', (error) => {
@@ -209,11 +221,7 @@ function sendSignal(state: ProcessState, signal: NodeJS.Signals): boolean {
   }
 }
 
-function stopWithCommand(
-  config: ServiceConfig,
-  emitter: EventEmitter,
-  state: ProcessState,
-): void {
+function stopWithCommand(config: ServiceConfig, emitter: EventEmitter, state: ProcessState): void {
   if (config.stop === null) {
     return;
   }
@@ -258,6 +266,28 @@ function escalateToSigkill(emitter: EventEmitter, state: ProcessState): void {
 }
 
 function stopProcess(config: ServiceConfig, emitter: EventEmitter, state: ProcessState): void {
+  // For runOnce services where process already exited (ready state), just run stop command
+  if (state.process === null && config.runOnce && state.status === 'ready') {
+    emitStatus(emitter, state, 'stopping');
+    if (config.stop !== null) {
+      const stopProcess = spawn(config.stop, {
+        cwd: config.dir,
+        shell: true,
+        env: parseEnvConfig(config.env),
+        stdio: 'ignore',
+      });
+      stopProcess.on('exit', () => {
+        emitStatus(emitter, state, 'stopped', 0);
+      });
+      stopProcess.on('error', () => {
+        emitStatus(emitter, state, 'stopped', 0);
+      });
+    } else {
+      emitStatus(emitter, state, 'stopped', 0);
+    }
+    return;
+  }
+
   if (state.process === null) {
     return;
   }

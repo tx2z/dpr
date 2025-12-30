@@ -1,10 +1,4 @@
-export type ServiceStatus =
-  | 'stopped'
-  | 'waiting'
-  | 'starting'
-  | 'ready'
-  | 'stopping'
-  | 'crashed';
+export type ServiceStatus = 'stopped' | 'waiting' | 'starting' | 'ready' | 'stopping' | 'crashed';
 
 export type ServiceColor = 'green' | 'blue' | 'yellow' | 'magenta' | 'cyan' | 'red';
 
@@ -29,6 +23,8 @@ export interface ServiceConfig {
   readonly dependsOn: readonly string[];
   readonly readyPattern: string | null;
   readonly readyDelay: number;
+  readonly runOnce: boolean;
+  readonly keepRunning: boolean;
 }
 
 export interface GlobalConfig {

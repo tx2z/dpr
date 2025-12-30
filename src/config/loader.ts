@@ -4,7 +4,11 @@ import * as path from 'node:path';
 import yaml from 'js-yaml';
 import { ZodError } from 'zod';
 
-import { CircularDependencyError, detectCircularDependencies, buildDependencyGraph } from './dependencies.js';
+import {
+  CircularDependencyError,
+  detectCircularDependencies,
+  buildDependencyGraph,
+} from './dependencies.js';
 import { assignDefaultColors, parseConfig } from './schema.js';
 
 import type { RawConfig } from './schema.js';
@@ -93,6 +97,8 @@ function transformRawConfig(raw: RawConfig, configDir: string): Config {
     dependsOn: s.dependsOn,
     readyPattern: s.readyPattern ?? null,
     readyDelay: s.readyDelay,
+    runOnce: s.runOnce,
+    keepRunning: s.keepRunning,
   }));
 
   const global: GlobalConfig = {
