@@ -122,6 +122,7 @@ services:
     readyDelay: number    # ms to wait before ready
     env: Record<string, string>
     logs: boolean     # Per-service log override
+    runOnce: boolean  # For commands that start bg services and exit (e.g. supabase start)
 ```
 
 ## Testing
