@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write  # Required for npm trusted publishers (OIDC)
+
+jobs:
+  # Job 1: Publish to npm using trusted publishers (OIDC)
+  npm-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'  # Node 22+ required for OIDC
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
+
+  # Job 2: Build executables (matrix)
+  build-executables:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: node20-macos-arm64
+            artifact: dpr-macos-arm64
+          - os: macos-13
+            target: node20-macos-x64
+            artifact: dpr-macos-x64
+          - os: ubuntu-latest
+            target: node20-linux-x64
+            artifact: dpr-linux-x64
+          - os: ubuntu-24.04-arm64
+            target: node20-linux-arm64
+            artifact: dpr-linux-arm64
+          - os: windows-latest
+            target: node20-win-x64
+            artifact: dpr-win-x64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx @yao-pkg/pkg . -t ${{ matrix.target }} -o ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  # Job 3: Create GitHub Release
+  create-release:
+    needs: build-executables
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+
+  # Job 4: Update Homebrew formula
+  update-homebrew:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: tx2z/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Download release artifacts
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Downloading release artifacts for v${VERSION}..."
+
+          curl -L -o dpr-macos-arm64 "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-macos-arm64"
+          curl -L -o dpr-macos-x64 "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-macos-x64"
+          curl -L -o dpr-linux-arm64 "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-linux-arm64"
+          curl -L -o dpr-linux-x64 "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-linux-x64"
+
+      - name: Calculate SHA256 and update formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          SHA_MACOS_ARM64=$(sha256sum dpr-macos-arm64 | cut -d' ' -f1)
+          SHA_MACOS_X64=$(sha256sum dpr-macos-x64 | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(sha256sum dpr-linux-arm64 | cut -d' ' -f1)
+          SHA_LINUX_X64=$(sha256sum dpr-linux-x64 | cut -d' ' -f1)
+
+          echo "SHA256 checksums:"
+          echo "  macOS ARM64: ${SHA_MACOS_ARM64}"
+          echo "  macOS x64:   ${SHA_MACOS_X64}"
+          echo "  Linux ARM64: ${SHA_LINUX_ARM64}"
+          echo "  Linux x64:   ${SHA_LINUX_X64}"
+
+          mkdir -p homebrew-tap/Formula
+
+          cat > homebrew-tap/Formula/dev-process-runner.rb << 'FORMULA'
+          class DevProcessRunner < Formula
+            desc "Terminal UI for managing multiple development services"
+            homepage "https://github.com/tx2z/dpr"
+            license "MIT"
+          FORMULA
+
+          cat >> homebrew-tap/Formula/dev-process-runner.rb << FORMULA
+            version "${VERSION}"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-macos-arm64"
+                sha256 "${SHA_MACOS_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-macos-x64"
+                sha256 "${SHA_MACOS_X64}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-linux-arm64"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/tx2z/dpr/releases/download/v${VERSION}/dpr-linux-x64"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+          FORMULA
+
+          cat >> homebrew-tap/Formula/dev-process-runner.rb << 'FORMULA'
+
+            def install
+              binary_name = if OS.mac?
+                Hardware::CPU.arm? ? "dpr-macos-arm64" : "dpr-macos-x64"
+              else
+                Hardware::CPU.arm? ? "dpr-linux-arm64" : "dpr-linux-x64"
+              end
+              bin.install binary_name => "dpr"
+            end
+
+            test do
+              assert_match "dpr", shell_output("#{bin}/dpr --help 2>&1", 1)
+            end
+          end
+          FORMULA
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dev-process-runner.rb
+          git diff --staged --quiet || git commit -m "Update dpr to ${GITHUB_REF#refs/tags/}"
+          git push

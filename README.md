@@ -13,25 +13,53 @@ A terminal-based UI application for managing multiple development services simul
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
 ```bash
-npm install
-npm run build
+brew install tx2z/tap/dev-process-runner
 ```
+
+### npm (requires Node.js 20+)
+
+```bash
+npm install -g @tx2z/dev-process-runner
+```
+
+### Direct Download
+
+Download the latest binary for your platform from [GitHub Releases](https://github.com/tx2z/dpr/releases):
+
+| Platform | Download |
+|----------|----------|
+| macOS (Apple Silicon) | `dpr-macos-arm64` |
+| macOS (Intel) | `dpr-macos-x64` |
+| Linux (x64) | `dpr-linux-x64` |
+| Linux (ARM64) | `dpr-linux-arm64` |
+| Windows (x64) | `dpr-win-x64.exe` |
+
+After downloading, make it executable and move to your PATH:
+
+```bash
+chmod +x dpr-macos-arm64
+sudo mv dpr-macos-arm64 /usr/local/bin/dpr
+```
+
+> **Note:** Windows support is experimental. Process management and terminal rendering may have issues on Windows.
 
 ## Usage
 
 ```bash
 # Run with default config (./dpr.yaml)
-node dist/src/index.js
+dpr
 
 # Run with custom config
-node dist/src/index.js --config path/to/config.yaml
+dpr --config path/to/config.yaml
 
 # Validate config without running
-node dist/src/index.js --validate
+dpr --validate
 
 # Show help
-node dist/src/index.js --help
+dpr --help
 ```
 
 ## Configuration
@@ -90,6 +118,7 @@ services:
 | `dependsOn` | string[] | [] | Service dependencies |
 | `readyPattern` | string | null | Regex pattern to detect ready state |
 | `readyDelay` | number | 500 | Delay after first output before ready |
+| `runOnce` | boolean | false | For commands that start background services and exit (e.g., `supabase start`, `docker-compose up -d`) |
 
 ### Colors
 
@@ -103,14 +132,36 @@ Available colors: `green`, `blue`, `yellow`, `magenta`, `cyan`, `red`
 |-----|--------|
 | `q` / `Ctrl+C` | Quit application |
 | `/` | Enter command mode |
-| `?` | Enter search mode |
-| `1-6` | Focus service panel by number |
+| `?` | Show help |
+| `f` | Enter search mode |
+| `1-9` | Focus service panel by number |
 | `Tab` / `Shift+Tab` | Cycle through panels |
-| `Escape` | Clear panel focus |
+
+### Focused Panel (View Mode)
+
+When a panel is focused (highlighted border):
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Enter action mode |
+| `Escape` | Unfocus panel |
 | `j` / `Down Arrow` | Scroll logs down |
 | `k` / `Up Arrow` | Scroll logs up |
 | `g` | Scroll to top |
 | `G` | Scroll to bottom |
+
+### Action Mode
+
+When in action mode (green double border):
+
+| Key | Action |
+|-----|--------|
+| `s` | Start service |
+| `x` | Stop service (graceful) |
+| `K` | Kill service (force) |
+| `Escape` | Exit action mode |
+
+> **Note:** Action mode requires explicit activation with `Enter` to prevent accidental service stops.
 
 ### Command Mode
 
@@ -176,6 +227,11 @@ Log format:
 ## Development
 
 ```bash
+# Clone and install
+git clone https://github.com/tx2z/dpr.git
+cd dpr
+npm install
+
 # Run in development mode
 npm run dev
 
@@ -190,6 +246,9 @@ npm test
 
 # Build
 npm run build
+
+# Run built version
+node dist/index.js
 ```
 
 ## License
