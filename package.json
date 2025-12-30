@@ -1,6 +1,6 @@
 {
   "name": "@tx2z/dev-process-runner",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Dev Process Runner - A TUI tool to manage multiple development services",
   "type": "module",
   "main": "dist/index.js",
