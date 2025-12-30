@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useEffect } from 'react';
 
 import type { AppStoreApi, SearchMatch } from '../store/index.js';
 
@@ -35,7 +35,11 @@ function findMatchesInLine(
   return matches;
 }
 
-function findMatches(term: string, store: AppStoreApi, serviceFilter: string | null): readonly SearchMatch[] {
+function findMatches(
+  term: string,
+  store: AppStoreApi,
+  serviceFilter: string | null,
+): readonly SearchMatch[] {
   if (term.length === 0) {
     return [];
   }
@@ -89,62 +93,55 @@ function scrollToMatch(store: AppStoreApi, match: SearchMatch | undefined): void
   }
 }
 
-export function useSearch(store: AppStoreApi): UseSearchResult {
+function navigateMatch(store: AppStoreApi, direction: 1 | -1): void {
+  const current = store.getState().searchState;
+  if (current === null || current.matches.length === 0) {
+    return;
+  }
+  const newIndex =
+    (current.currentMatchIndex + direction + current.matches.length) % current.matches.length;
+  store.getState().setSearchState({ ...current, currentMatchIndex: newIndex });
+  scrollToMatch(store, current.matches[newIndex]);
+}
+
+function createSearchCallbacks(store: AppStoreApi): UseSearchResult {
+  return {
+    updateSearchTerm: (input: string): void => {
+      const { term, serviceFilter } = parseSearchInput(input);
+      const matches = findMatches(term, store, serviceFilter);
+      store.getState().setSearchState({ term, serviceFilter, matches, currentMatchIndex: 0 });
+    },
+    nextMatch: (): void => {
+      navigateMatch(store, 1);
+    },
+    prevMatch: (): void => {
+      navigateMatch(store, -1);
+    },
+    clearSearch: (): void => {
+      store.getState().setSearchState(null);
+    },
+  };
+}
+
+function useSyncSearchMatches(store: AppStoreApi): void {
   const searchState = store.getState().searchState;
 
   useEffect(() => {
     if (searchState === null) {
       return;
     }
-
     const matches = findMatches(searchState.term, store, searchState.serviceFilter);
     const currentIndex = Math.min(searchState.currentMatchIndex, Math.max(0, matches.length - 1));
-
     const needsUpdate =
-      matches.length !== searchState.matches.length || currentIndex !== searchState.currentMatchIndex;
-
+      matches.length !== searchState.matches.length ||
+      currentIndex !== searchState.currentMatchIndex;
     if (needsUpdate) {
       store.getState().setSearchState({ ...searchState, matches, currentMatchIndex: currentIndex });
     }
   }, [searchState, store]);
+}
 
-  const updateSearchTerm = useCallback(
-    (input: string): void => {
-      const { term, serviceFilter } = parseSearchInput(input);
-      const matches = findMatches(term, store, serviceFilter);
-      store.getState().setSearchState({
-        term,
-        serviceFilter,
-        matches,
-        currentMatchIndex: 0,
-      });
-    },
-    [store],
-  );
-
-  const nextMatch = useCallback((): void => {
-    const current = store.getState().searchState;
-    if (current === null || current.matches.length === 0) {
-      return;
-    }
-    const nextIndex = (current.currentMatchIndex + 1) % current.matches.length;
-    store.getState().setSearchState({ ...current, currentMatchIndex: nextIndex });
-    scrollToMatch(store, current.matches[nextIndex]);
-  }, [store]);
-
-  const prevMatch = useCallback((): void => {
-    const current = store.getState().searchState;
-    if (current === null || current.matches.length === 0) {
-      return;
-    }
-    const prevIndex = (current.currentMatchIndex - 1 + current.matches.length) % current.matches.length;
-    store.getState().setSearchState({ ...current, currentMatchIndex: prevIndex });
-    scrollToMatch(store, current.matches[prevIndex]);
-  }, [store]);
-
-  const clearSearch = useCallback((): void => {
-    store.getState().setSearchState(null);
-  }, [store]);
-
-  return { updateSearchTerm, nextMatch, prevMatch, clearSearch };
+export function useSearch(store: AppStoreApi): UseSearchResult {
+  useSyncSearchMatches(store);
+  return createSearchCallbacks(store);
 }

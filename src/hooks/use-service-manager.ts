@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { getStartOrder } from '../config/dependencies.js';
 import { createProcessManager } from '../services/index.js';
@@ -39,7 +39,11 @@ function areAllDependenciesReady(serviceId: string, config: Config, store: AppSt
   return true;
 }
 
-function getWaitingDependencies(serviceId: string, config: Config, store: AppStoreApi): readonly string[] {
+function getWaitingDependencies(
+  serviceId: string,
+  config: Config,
+  store: AppStoreApi,
+): readonly string[] {
   const serviceConfig = config.services.find((s) => s.id === serviceId);
   if (serviceConfig === undefined) {
     return [];
@@ -56,11 +60,18 @@ function getWaitingDependencies(serviceId: string, config: Config, store: AppSto
   return waiting;
 }
 
-function shouldLogToFile(serviceConfig: { logs: boolean }, globalConfig: { logs: boolean }): boolean {
+function shouldLogToFile(
+  serviceConfig: { logs: boolean },
+  globalConfig: { logs: boolean },
+): boolean {
   return serviceConfig.logs || globalConfig.logs;
 }
 
-function setupFileLogger(serviceId: string, config: Config, state: ServiceManagerState): FileLogger | undefined {
+function setupFileLogger(
+  serviceId: string,
+  config: Config,
+  state: ServiceManagerState,
+): FileLogger | undefined {
   const serviceConfig = config.services.find((s) => s.id === serviceId);
   if (serviceConfig === undefined) {
     return undefined;
@@ -140,7 +151,11 @@ function startServiceInternal(
   manager.start();
 }
 
-function checkPendingAutostart(config: Config, store: AppStoreApi, state: ServiceManagerState): void {
+function checkPendingAutostart(
+  config: Config,
+  store: AppStoreApi,
+  state: ServiceManagerState,
+): void {
   const pending = [...state.pendingAutostart];
   for (const serviceId of pending) {
     if (areAllDependenciesReady(serviceId, config, store)) {
@@ -162,6 +177,7 @@ export interface UseServiceManagerResult {
   readonly killService: (serviceId: string) => void;
   readonly startAll: () => void;
   readonly stopAll: () => void;
+  readonly stopAllAndWait: (onComplete: () => void, timeoutMs?: number) => void;
 }
 
 function runAutostart(config: Config, store: AppStoreApi, state: ServiceManagerState): void {
@@ -190,6 +206,87 @@ function disposeAllManagers(state: ServiceManagerState): void {
   state.pendingAutostart.clear();
 }
 
+function isManagerRunning(manager: ProcessManager): boolean {
+  return manager.status !== 'stopped' && manager.status !== 'crashed';
+}
+
+function getStoppableManagers(managers: ProcessManager[], config: Config): ProcessManager[] {
+  const keepRunningIds = new Set(config.services.filter((s) => s.keepRunning).map((s) => s.id));
+  return managers.filter((m) => !keepRunningIds.has(m.serviceId));
+}
+
+function stopAllAndWaitInternal(
+  managers: ProcessManager[],
+  onComplete: () => void,
+  timeoutMs: number,
+): void {
+  const runningManagers = managers.filter(isManagerRunning);
+  if (runningManagers.length === 0) {
+    onComplete();
+    return;
+  }
+
+  for (const manager of runningManagers) {
+    manager.stop();
+  }
+
+  const timeoutId = setTimeout(() => {
+    clearInterval(checkInterval);
+    for (const manager of managers) {
+      if (isManagerRunning(manager)) {
+        manager.kill();
+      }
+    }
+    setTimeout(onComplete, 500);
+  }, timeoutMs);
+
+  const checkInterval = setInterval(() => {
+    if (!managers.some(isManagerRunning)) {
+      clearInterval(checkInterval);
+      clearTimeout(timeoutId);
+      onComplete();
+    }
+  }, 100);
+}
+
+interface ServiceManagerDeps {
+  readonly config: Config;
+  readonly store: AppStoreApi;
+  readonly stateRef: React.RefObject<ServiceManagerState>;
+}
+
+function createServiceCallbacks(deps: ServiceManagerDeps): UseServiceManagerResult {
+  const { config, store, stateRef } = deps;
+  return {
+    startService: (serviceId: string): void => {
+      startServiceInternal(serviceId, config, store, stateRef.current);
+    },
+    stopService: (serviceId: string): void => stateRef.current.managers.get(serviceId)?.stop(),
+    killService: (serviceId: string): void => stateRef.current.managers.get(serviceId)?.kill(),
+    startAll: (): void => {
+      const startOrder = getStartOrder(
+        config.services.map((s) => s.id),
+        config.services,
+      );
+      for (const serviceId of startOrder) {
+        startServiceInternal(serviceId, config, store, stateRef.current);
+      }
+    },
+    stopAll: (): void => {
+      const allManagers = Array.from(stateRef.current.managers.values());
+      const stoppable = getStoppableManagers(allManagers, config);
+      for (const manager of stoppable) {
+        manager.stop();
+      }
+    },
+    stopAllAndWait: (onComplete: () => void, timeoutMs?: number): void => {
+      const allManagers = Array.from(stateRef.current.managers.values());
+      const stoppable = getStoppableManagers(allManagers, config);
+      stopAllAndWaitInternal(stoppable, onComplete, timeoutMs ?? 15000);
+    },
+  };
+}
+
 export function useServiceManager(config: Config, store: AppStoreApi): UseServiceManagerResult {
   const stateRef = useRef<ServiceManagerState>(createServiceManager());
 
@@ -204,34 +301,5 @@ export function useServiceManager(config: Config, store: AppStoreApi): UseServic
     };
   }, []);
 
-  const startService = useCallback(
-    (serviceId: string): void => {
-      startServiceInternal(serviceId, config, store, stateRef.current);
-    },
-    [config, store],
-  );
-
-  const stopService = useCallback((serviceId: string): void => {
-    stateRef.current.managers.get(serviceId)?.stop();
-  }, []);
-
-  const killService = useCallback((serviceId: string): void => {
-    stateRef.current.managers.get(serviceId)?.kill();
-  }, []);
-
-  const startAll = useCallback((): void => {
-    const allServiceIds = config.services.map((s) => s.id);
-    const startOrder = getStartOrder(allServiceIds, config.services);
-    for (const serviceId of startOrder) {
-      startServiceInternal(serviceId, config, store, stateRef.current);
-    }
-  }, [config, store]);
-
-  const stopAll = useCallback((): void => {
-    for (const manager of stateRef.current.managers.values()) {
-      manager.stop();
-    }
-  }, []);
-
-  return { startService, stopService, killService, startAll, stopAll };
+  return createServiceCallbacks({ config, store, stateRef });
 }

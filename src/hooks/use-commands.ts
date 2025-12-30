@@ -38,10 +38,7 @@ function parseServiceArg(arg: string | undefined, config: Config): string | null
   return service?.id ?? null;
 }
 
-function createStartCommand(
-  config: Config,
-  serviceManager: UseServiceManagerResult,
-): Command {
+function createStartCommand(config: Config, serviceManager: UseServiceManagerResult): Command {
   return {
     name: 'start',
     aliases: ['s'],
@@ -56,10 +53,7 @@ function createStartCommand(
   };
 }
 
-function createStopCommand(
-  config: Config,
-  serviceManager: UseServiceManagerResult,
-): Command {
+function createStopCommand(config: Config, serviceManager: UseServiceManagerResult): Command {
   return {
     name: 'stop',
     aliases: ['x'],
@@ -74,10 +68,7 @@ function createStopCommand(
   };
 }
 
-function createKillCommand(
-  config: Config,
-  serviceManager: UseServiceManagerResult,
-): Command {
+function createKillCommand(config: Config, serviceManager: UseServiceManagerResult): Command {
   return {
     name: 'kill',
     aliases: ['k'],
@@ -112,7 +103,10 @@ function createRestartCommand(
         serviceManager.stopService(serviceId);
         const checkAndStart = (): void => {
           const currentRuntime = store.getState().services[serviceId];
-          if (currentRuntime?.state.status === 'stopped' || currentRuntime?.state.status === 'crashed') {
+          if (
+            currentRuntime?.state.status === 'stopped' ||
+            currentRuntime?.state.status === 'crashed'
+          ) {
             serviceManager.startService(serviceId);
           } else {
             setTimeout(checkAndStart, 100);
@@ -190,8 +184,7 @@ function createQuitCommand(exit: () => void, serviceManager: UseServiceManagerRe
     description: 'Stop all and exit',
     usage: '/quit',
     execute: (): void => {
-      serviceManager.stopAll();
-      setTimeout(exit, 500);
+      serviceManager.stopAllAndWait(exit);
     },
   };
 }
@@ -203,7 +196,7 @@ function createHelpCommand(store: AppStoreApi): Command {
     description: 'Show help',
     usage: '/help',
     execute: (): void => {
-      store.getState().setMode('normal');
+      store.getState().setMode('help');
     },
   };
 }
@@ -220,7 +213,10 @@ function toSuggestion(cmd: Command): CommandSuggestion {
   return { command: cmd.name, description: cmd.description };
 }
 
-function getSuggestionsForInput(commands: readonly Command[], input: string): readonly CommandSuggestion[] {
+function getSuggestionsForInput(
+  commands: readonly Command[],
+  input: string,
+): readonly CommandSuggestion[] {
   if (input.length === 0) {
     return commands.map(toSuggestion);
   }
@@ -234,7 +230,9 @@ function findAndExecuteCommand(commands: readonly Command[], input: string): boo
   if (cmdName === undefined || cmdName.length === 0) {
     return false;
   }
-  const command = commands.find((cmd) => cmd.name.toLowerCase() === cmdName || cmd.aliases.includes(cmdName));
+  const command = commands.find(
+    (cmd) => cmd.name.toLowerCase() === cmdName || cmd.aliases.includes(cmdName),
+  );
   if (command === undefined) {
     return false;
   }
@@ -268,8 +266,17 @@ export function useCommands(
   serviceManager: UseServiceManagerResult,
   exit: () => void,
 ): UseCommandsResult {
-  const commands = useMemo(() => createAllCommands(config, store, serviceManager, exit), [config, store, serviceManager, exit]);
-  const getSuggestions = useCallback((input: string) => getSuggestionsForInput(commands, input), [commands]);
-  const executeCommand = useCallback((input: string) => findAndExecuteCommand(commands, input), [commands]);
+  const commands = useMemo(
+    () => createAllCommands(config, store, serviceManager, exit),
+    [config, store, serviceManager, exit],
+  );
+  const getSuggestions = useCallback(
+    (input: string) => getSuggestionsForInput(commands, input),
+    [commands],
+  );
+  const executeCommand = useCallback(
+    (input: string) => findAndExecuteCommand(commands, input),
+    [commands],
+  );
   return { commands, getSuggestions, executeCommand };
 }
