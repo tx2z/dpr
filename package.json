@@ -26,7 +26,7 @@
     "test:coverage": "vitest --coverage",
     "validate": "npm run typecheck && npm run lint && npm run format:check && npm run test:run",
     "prepublishOnly": "npm run validate && npm run build",
-    "build:exe": "npm run build && npx @yao-pkg/pkg .",
+    "build:exe": "bun build src/index.tsx --compile --outfile dpr",
     "release": "./scripts/release.sh"
   },
   "keywords": [
@@ -48,18 +48,6 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "pkg": {
-    "scripts": "dist/**/*.js",
-    "assets": [],
-    "targets": [
-      "node20-macos-x64",
-      "node20-macos-arm64",
-      "node20-linux-x64",
-      "node20-linux-arm64",
-      "node20-win-x64"
-    ],
-    "outputPath": "releases"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -85,6 +73,7 @@
     "eslint-plugin-unicorn": "^59.0.1",
     "ink-testing-library": "^4.0.0",
     "prettier": "^3.7.4",
+    "react-devtools-core": "^6.1.5",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.32.1",

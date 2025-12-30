@@ -28,3 +28,4 @@ logs/
 
 # dpr runtime logs
 .dpr/
+*.bun-build
