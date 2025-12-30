@@ -28,8 +28,39 @@ jobs:
       - run: npm run build
       - run: npm publish --provenance --access public
 
-  # Job 2: Build all executables via cross-compilation (free runners only)
-  build-executables:
+  # Job 2a: Build macOS binaries (with native code signing)
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Build macOS binaries
+        run: |
+          npx @yao-pkg/pkg . -t node20-macos-arm64 -o dpr-macos-arm64
+          npx @yao-pkg/pkg . -t node20-macos-x64 -o dpr-macos-x64
+
+      - name: Sign macOS binaries
+        run: |
+          codesign --sign - --force dpr-macos-arm64
+          codesign --sign - --force dpr-macos-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-macos
+          path: |
+            dpr-macos-arm64
+            dpr-macos-x64
+
+  # Job 2b: Build Linux and Windows binaries
+  build-linux-windows:
     runs-on: ubuntu-latest
 
     steps:
@@ -42,34 +73,30 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Build all platform binaries
+      - name: Build Linux and Windows binaries
         run: |
-          npx @yao-pkg/pkg . -t node20-macos-arm64 -o dpr-macos-arm64
-          npx @yao-pkg/pkg . -t node20-macos-x64 -o dpr-macos-x64
           npx @yao-pkg/pkg . -t node20-linux-x64 -o dpr-linux-x64
           npx @yao-pkg/pkg . -t node20-linux-arm64 -o dpr-linux-arm64
           npx @yao-pkg/pkg . -t node20-win-x64 -o dpr-win-x64.exe
 
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries
+          name: binaries-linux-windows
           path: |
-            dpr-macos-arm64
-            dpr-macos-x64
             dpr-linux-x64
             dpr-linux-arm64
             dpr-win-x64.exe
 
   # Job 3: Create GitHub Release
   create-release:
-    needs: build-executables
+    needs: [build-macos, build-linux-windows]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: binaries
           path: artifacts
+          merge-multiple: true
 
       - name: List artifacts
         run: ls -la artifacts/
