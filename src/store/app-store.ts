@@ -1,6 +1,12 @@
 import { createStore } from 'zustand';
 
-import type { Config, LogLine, ServiceConfig, ServiceState, ServiceStatus } from '../config/index.js';
+import type {
+  Config,
+  LogLine,
+  ServiceConfig,
+  ServiceState,
+  ServiceStatus,
+} from '../config/index.js';
 import type { StoreApi } from 'zustand';
 
 export interface SearchMatch {
@@ -17,7 +23,7 @@ export interface SearchState {
   readonly currentMatchIndex: number;
 }
 
-export type AppMode = 'normal' | 'command' | 'search';
+export type AppMode = 'normal' | 'command' | 'search' | 'help' | 'fullscreen';
 
 export interface ServiceRuntime {
   readonly state: ServiceState;
@@ -106,11 +112,18 @@ function createAppendLog(set: SetState) {
         return state;
       }
       const newLogs = [...existing.logs, line];
-      const trimmedLogs = newLogs.length > LOG_BUFFER_SIZE ? newLogs.slice(-LOG_BUFFER_SIZE) : newLogs;
+      const trimmedLogs =
+        newLogs.length > LOG_BUFFER_SIZE ? newLogs.slice(-LOG_BUFFER_SIZE) : newLogs;
+      // Auto-scroll to bottom by setting scrollOffset to a large value
+      // LogView will clamp this to the valid range
       return {
         services: {
           ...state.services,
-          [serviceId]: { ...existing, logs: trimmedLogs },
+          [serviceId]: {
+            ...existing,
+            logs: trimmedLogs,
+            scrollOffset: Number.MAX_SAFE_INTEGER,
+          },
         },
       };
     });
