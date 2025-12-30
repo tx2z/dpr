@@ -28,44 +28,37 @@ jobs:
       - run: npm run build
       - run: npm publish --provenance --access public
 
-  # Job 2: Build executables (matrix)
+  # Job 2: Build all executables via cross-compilation (free runners only)
   build-executables:
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: node20-macos-arm64
-            artifact: dpr-macos-arm64
-          - os: macos-15-large
-            target: node20-macos-x64
-            artifact: dpr-macos-x64
-          - os: ubuntu-latest
-            target: node20-linux-x64
-            artifact: dpr-linux-x64
-          - os: ubuntu-24.04-arm64
-            target: node20-linux-arm64
-            artifact: dpr-linux-arm64
-          - os: windows-latest
-            target: node20-win-x64
-            artifact: dpr-win-x64.exe
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - run: npm ci
       - run: npm run build
-      - run: npx @yao-pkg/pkg . -t ${{ matrix.target }} -o ${{ matrix.artifact }}
+
+      - name: Build all platform binaries
+        run: |
+          npx @yao-pkg/pkg . -t node20-macos-arm64 -o dpr-macos-arm64
+          npx @yao-pkg/pkg . -t node20-macos-x64 -o dpr-macos-x64
+          npx @yao-pkg/pkg . -t node20-linux-x64 -o dpr-linux-x64
+          npx @yao-pkg/pkg . -t node20-linux-arm64 -o dpr-linux-arm64
+          npx @yao-pkg/pkg . -t node20-win-x64 -o dpr-win-x64.exe
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: binaries
+          path: |
+            dpr-macos-arm64
+            dpr-macos-x64
+            dpr-linux-x64
+            dpr-linux-arm64
+            dpr-win-x64.exe
 
   # Job 3: Create GitHub Release
   create-release:
@@ -75,8 +68,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: binaries
           path: artifacts
-          merge-multiple: true
 
       - name: List artifacts
         run: ls -la artifacts/
