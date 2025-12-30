@@ -63,9 +63,11 @@ Provenance attestations are automatically generated, providing cryptographic pro
 
 ### Requirements
 
-- Node.js 22+ or npm 11.5+ (for OIDC support)
+- **npm 11.5.1+** (required for OIDC support - Node 22 doesn't ship with this by default)
 - GitHub-hosted runners (self-hosted not yet supported)
 - Public repository (for provenance attestations)
+
+> **Note:** The workflow installs `npm@latest` before publishing to ensure OIDC compatibility.
 
 ---
 
