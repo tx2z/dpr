@@ -1,4 +1,5 @@
 export { useCommands } from './use-commands.js';
+export { useMouse } from './use-mouse-wheel.js';
 export { useProcess } from './use-process.js';
 export { useSearch } from './use-search.js';
 export { useServiceManager } from './use-service-manager.js';
