@@ -71,7 +71,10 @@ interface LayoutRowProps {
   readonly onKill: (serviceId: string) => void;
 }
 
-function calculateGlobalIndex(rows: readonly (readonly ServiceDisplay[])[], rowIndex: number): number {
+function calculateGlobalIndex(
+  rows: readonly (readonly ServiceDisplay[])[],
+  rowIndex: number,
+): number {
   return rows.slice(0, rowIndex).reduce((sum, r) => sum + r.length, 0);
 }
 
@@ -101,6 +104,7 @@ function LayoutRow(props: LayoutRowProps): React.ReactElement {
     <Box flexDirection="row">
       {rowServices.map((service, colIndex) => {
         const globalIndex = baseIndex + colIndex;
+        const isFocused = focusedIndex === globalIndex;
         const isLastItem = isLastRow && colIndex === servicesInRow - 1;
         const width = calculateSpaceWidth(isLastItem, lastRowSpan, spaceWidth, columns, colIndex);
 
@@ -112,7 +116,7 @@ function LayoutRow(props: LayoutRowProps): React.ReactElement {
             state={service.state}
             logs={service.logs}
             scrollOffset={service.scrollOffset}
-            focused={focusedIndex === globalIndex}
+            focused={isFocused}
             width={width}
             height={rowHeight}
             searchTerm={searchTerm}

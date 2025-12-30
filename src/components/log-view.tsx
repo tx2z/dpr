@@ -50,15 +50,13 @@ function HighlightedText({
   serviceId,
 }: HighlightProps): React.ReactElement {
   if (searchTerm === '') {
-    return <Text>{text}</Text>;
+    return <Text wrap="truncate">{text}</Text>;
   }
 
-  const lineMatches = matches.filter(
-    (m) => m.serviceId === serviceId && m.lineIndex === lineIndex,
-  );
+  const lineMatches = matches.filter((m) => m.serviceId === serviceId && m.lineIndex === lineIndex);
 
   if (lineMatches.length === 0) {
-    return <Text>{text}</Text>;
+    return <Text wrap="truncate">{text}</Text>;
   }
 
   const parts: React.ReactElement[] = [];
@@ -71,7 +69,13 @@ function HighlightedText({
       );
     }
 
-    const isCurrent = isCurrentMatch(matches, currentMatchIndex, serviceId, lineIndex, match.startCol);
+    const isCurrent = isCurrentMatch(
+      matches,
+      currentMatchIndex,
+      serviceId,
+      lineIndex,
+      match.startCol,
+    );
 
     parts.push(
       <Text
@@ -93,24 +97,34 @@ function HighlightedText({
   return <>{parts}</>;
 }
 
-function LogLine({
-  line,
-  lineIndex,
-  searchTerm,
-  searchMatches,
-  currentMatchIndex,
-  serviceId,
-}: {
+// Strip control characters that can break terminal rendering
+function sanitizeLogContent(content: string): string {
+  // Remove carriage returns and other control chars except newline
+  // eslint-disable-next-line no-control-regex
+  return content.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
+}
+
+interface LogLineComponentProps {
   readonly line: LogLine;
   readonly lineIndex: number;
   readonly searchTerm: string;
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
   readonly serviceId: string;
-}): React.ReactElement {
+}
+
+const LogLineComponent = React.memo(function LogLineComponent({
+  line,
+  lineIndex,
+  searchTerm,
+  searchMatches,
+  currentMatchIndex,
+  serviceId,
+}: LogLineComponentProps): React.ReactElement {
+  const sanitizedContent = sanitizeLogContent(line.content);
   const content = (
     <HighlightedText
-      text={line.content}
+      text={sanitizedContent}
       searchTerm={searchTerm}
       matches={searchMatches}
       currentMatchIndex={currentMatchIndex}
@@ -121,14 +135,20 @@ function LogLine({
 
   if (line.stream === 'stderr') {
     return (
-      <Box key={lineIndex}>
-        <Text color="red">{content}</Text>
+      <Box key={lineIndex} overflowX="hidden">
+        <Text color="red" wrap="truncate">
+          {content}
+        </Text>
       </Box>
     );
   }
 
-  return <Box key={lineIndex}>{content}</Box>;
-}
+  return (
+    <Box key={lineIndex} overflowX="hidden">
+      {content}
+    </Box>
+  );
+});
 
 export function LogView({
   lines,
@@ -139,16 +159,19 @@ export function LogView({
   currentMatchIndex,
   serviceId,
 }: LogViewProps): React.ReactElement {
-  const visibleLines = lines.slice(scrollOffset, scrollOffset + height);
+  // Clamp scrollOffset to valid range (0 to max that shows last line)
+  const maxOffset = Math.max(0, lines.length - height);
+  const effectiveOffset = Math.min(scrollOffset, maxOffset);
+  const visibleLines = lines.slice(effectiveOffset, effectiveOffset + height);
   const emptyLines = Math.max(0, height - visibleLines.length);
 
   return (
     <Box flexDirection="column" height={height}>
       {visibleLines.map((line, index) => (
-        <LogLine
-          key={scrollOffset + index}
+        <LogLineComponent
+          key={effectiveOffset + index}
           line={line}
-          lineIndex={scrollOffset + index}
+          lineIndex={effectiveOffset + index}
           searchTerm={searchTerm}
           searchMatches={searchMatches}
           currentMatchIndex={currentMatchIndex}

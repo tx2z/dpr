@@ -21,3 +21,8 @@ export type { CommandPaletteProps, CommandSuggestion } from './command-palette.j
 
 export { SearchBar } from './search-bar.js';
 export type { SearchBarProps } from './search-bar.js';
+
+export { HelpOverlay } from './help-overlay.js';
+
+export { FullscreenOverlay } from './fullscreen-overlay.js';
+export type { FullscreenOverlayProps } from './fullscreen-overlay.js';

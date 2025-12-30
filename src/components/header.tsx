@@ -3,12 +3,9 @@ import React from 'react';
 
 export interface HeaderProps {
   readonly projectName: string | null;
-  readonly onStartAll?: () => void;
-  readonly onStopAll?: () => void;
-  readonly onQuit?: () => void;
 }
 
-export function Header({ projectName }: HeaderProps): React.ReactElement {
+export const Header = React.memo(function Header({ projectName }: HeaderProps): React.ReactElement {
   return (
     <Box
       borderStyle="round"
@@ -20,11 +17,9 @@ export function Header({ projectName }: HeaderProps): React.ReactElement {
       <Text bold color="white">
         {projectName ?? 'dpr'}
       </Text>
-      <Box gap={1}>
-        <Text color="gray">[▶ Start All]</Text>
-        <Text color="gray">[■ Stop All]</Text>
-        <Text color="gray">[Q Quit]</Text>
-      </Box>
+      <Text color="gray">
+        [/] cmd · [?] help · [f] find · [Tab] focus · [S] start all · [X] stop all · [q] quit
+      </Text>
     </Box>
   );
-}
+});
