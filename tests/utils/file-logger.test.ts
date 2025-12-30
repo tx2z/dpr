@@ -18,7 +18,10 @@ describe('createFileLogger', () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = path.join(os.tmpdir(), `dpr-test-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+    testDir = path.join(
+      os.tmpdir(),
+      `dpr-test-${String(Date.now())}-${Math.random().toString(36).slice(2)}`,
+    );
   });
 
   afterEach(async () => {

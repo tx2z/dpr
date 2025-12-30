@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { buildDependencyGraph, detectCircularDependencies, getStartOrder } from '../../src/config/dependencies.js';
+import {
+  buildDependencyGraph,
+  detectCircularDependencies,
+  getStartOrder,
+} from '../../src/config/dependencies.js';
 
 import type { ServiceConfig } from '../../src/config/types.js';
 

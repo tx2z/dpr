@@ -168,7 +168,9 @@ describe('store actions', () => {
 
   describe('clearLogs', () => {
     it('should clear service logs', () => {
-      store.getState().appendLog('api', { timestamp: new Date(), content: 'test', stream: 'stdout' });
+      store
+        .getState()
+        .appendLog('api', { timestamp: new Date(), content: 'test', stream: 'stdout' });
       store.getState().clearLogs('api');
       expect(store.getState().services['api']?.logs).toHaveLength(0);
     });
@@ -205,7 +207,9 @@ describe('store actions', () => {
     });
 
     it('should clear search state with null', () => {
-      store.getState().setSearchState({ term: 'test', serviceFilter: null, matches: [], currentMatchIndex: 0 });
+      store
+        .getState()
+        .setSearchState({ term: 'test', serviceFilter: null, matches: [], currentMatchIndex: 0 });
       store.getState().setSearchState(null);
       expect(store.getState().searchState).toBeNull();
     });
