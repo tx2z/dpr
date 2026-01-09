@@ -26,6 +26,9 @@ export type {
   ServiceColor,
   LogLine,
   ServiceLogs,
+  ScriptConfig,
+  ScriptParam,
+  ScriptExecution,
 } from './types.js';
 
 export {

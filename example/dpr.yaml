@@ -10,6 +10,15 @@ services:
     autostart: true
     color: green
     readyPattern: "API ready!"
+    scripts:
+      - id: health
+        name: "Health Check"
+        command: "echo 'Checking API health...' && sleep 0.5 && echo 'API is healthy!'"
+        key: c
+      - id: reset
+        name: "Reset API State"
+        command: "echo 'Resetting API state...' && sleep 1 && echo 'API state reset complete'"
+        key: r
 
   - id: web
     name: "Web Server"
@@ -26,3 +35,14 @@ services:
     autostart: false
     color: yellow
     readyPattern: "Worker ready!"
+    scripts:
+      - id: process-job
+        name: "Process Single Job"
+        command: "echo 'Processing job {jobId}...' && sleep 1 && echo 'Job {jobId} complete!'"
+        key: p
+        params:
+          - id: jobId
+            prompt: "Enter job ID"
+      - id: clear-queue
+        name: "Clear Job Queue"
+        command: "echo 'Clearing job queue...' && sleep 0.5 && echo 'Queue cleared'"

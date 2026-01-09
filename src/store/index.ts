@@ -6,4 +6,7 @@ export type {
   SearchState,
   SearchMatch,
   ServiceRuntime,
+  ScriptsMenuState,
+  ScriptOutputState,
+  ScriptHistoryState,
 } from './app-store.js';

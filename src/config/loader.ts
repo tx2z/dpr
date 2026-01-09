@@ -99,6 +99,13 @@ function transformRawConfig(raw: RawConfig, configDir: string): Config {
     readyDelay: s.readyDelay,
     runOnce: s.runOnce,
     keepRunning: s.keepRunning,
+    scripts: s.scripts.map((script) => ({
+      id: script.id,
+      name: script.name,
+      command: script.command,
+      key: script.key ?? null,
+      params: script.params,
+    })),
   }));
 
   const global: GlobalConfig = {

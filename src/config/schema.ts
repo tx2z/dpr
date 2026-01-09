@@ -14,6 +14,29 @@ const serviceColorSchema = z.enum(['green', 'blue', 'yellow', 'magenta', 'cyan',
 
 const envSchema = z.record(z.string(), z.string()).default({});
 
+const scriptParamSchema = z.object({
+  id: z.string().min(1, 'Script param ID is required'),
+  prompt: z.string().min(1, 'Script param prompt is required'),
+});
+
+const scriptSchema = z.object({
+  id: z
+    .string()
+    .min(1, 'Script ID is required')
+    .regex(
+      /^[\w-]+$/,
+      'Script ID must contain only alphanumeric characters, underscores, or hyphens',
+    ),
+  name: z.string().min(1, 'Script name is required'),
+  command: z.string().min(1, 'Script command is required'),
+  key: z
+    .string()
+    .length(1, 'Script key must be a single character')
+    .regex(/^[\da-z]$/i, 'Script key must be a letter or digit')
+    .optional(),
+  params: z.array(scriptParamSchema).default([]),
+});
+
 const serviceSchema = z.object({
   id: z
     .string()
@@ -35,9 +58,94 @@ const serviceSchema = z.object({
   readyDelay: z.number().positive().default(DEFAULT_READY_DELAY),
   runOnce: z.boolean().default(false),
   keepRunning: z.boolean().default(false),
+  scripts: z.array(scriptSchema).default([]),
 });
 
 const columnsSchema = z.union([z.number().int().positive().max(MAX_SERVICES), z.literal('auto')]);
+
+interface ConfigData {
+  services: z.infer<typeof serviceSchema>[];
+}
+type RefineCtx = z.RefinementCtx;
+
+function validateServiceCount(data: ConfigData, ctx: RefineCtx): void {
+  if (data.services.length < MIN_SERVICES) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `At least ${String(MIN_SERVICES)} services are required`,
+      path: ['services'],
+    });
+  }
+  if (data.services.length > MAX_SERVICES) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Maximum ${String(MAX_SERVICES)} services are allowed`,
+      path: ['services'],
+    });
+  }
+}
+
+function validateUniqueServiceIds(data: ConfigData, ctx: RefineCtx): string[] {
+  const ids = data.services.map((s) => s.id);
+  const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
+  if (duplicateIds.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Duplicate service IDs: ${[...new Set(duplicateIds)].join(', ')}`,
+      path: ['services'],
+    });
+  }
+  return ids;
+}
+
+function validateDependencies(
+  service: z.infer<typeof serviceSchema>,
+  idx: number,
+  idSet: Set<string>,
+  ctx: RefineCtx,
+): void {
+  for (const dep of service.dependsOn) {
+    if (!idSet.has(dep)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Service "${service.id}" depends on unknown service "${dep}"`,
+        path: ['services', idx, 'dependsOn'],
+      });
+    }
+    if (dep === service.id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Service "${service.id}" cannot depend on itself`,
+        path: ['services', idx, 'dependsOn'],
+      });
+    }
+  }
+}
+
+function validateServiceScripts(
+  service: z.infer<typeof serviceSchema>,
+  idx: number,
+  ctx: RefineCtx,
+): void {
+  const scriptIds = service.scripts.map((s) => s.id);
+  const dupScriptIds = scriptIds.filter((id, i) => scriptIds.indexOf(id) !== i);
+  if (dupScriptIds.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Duplicate script IDs in service "${service.id}": ${[...new Set(dupScriptIds)].join(', ')}`,
+      path: ['services', idx, 'scripts'],
+    });
+  }
+  const scriptKeys = service.scripts.map((s) => s.key).filter((k) => k !== undefined);
+  const dupKeys = scriptKeys.filter((k, i) => scriptKeys.indexOf(k) !== i);
+  if (dupKeys.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Duplicate script keys in service "${service.id}": ${[...new Set(dupKeys)].join(', ')}`,
+      path: ['services', idx, 'scripts'],
+    });
+  }
+}
 
 const configSchema = z
   .object({
@@ -48,53 +156,12 @@ const configSchema = z
     services: z.array(serviceSchema),
   })
   .superRefine((data, ctx) => {
-    // Validate service count
-    if (data.services.length < MIN_SERVICES) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `At least ${String(MIN_SERVICES)} services are required`,
-        path: ['services'],
-      });
-    }
-
-    if (data.services.length > MAX_SERVICES) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Maximum ${String(MAX_SERVICES)} services are allowed`,
-        path: ['services'],
-      });
-    }
-
-    // Validate unique IDs
-    const ids = data.services.map((s) => s.id);
-    const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
-    if (duplicateIds.length > 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Duplicate service IDs: ${[...new Set(duplicateIds)].join(', ')}`,
-        path: ['services'],
-      });
-    }
-
-    // Validate dependsOn references
+    validateServiceCount(data, ctx);
+    const ids = validateUniqueServiceIds(data, ctx);
     const idSet = new Set(ids);
     for (const [index, service] of data.services.entries()) {
-      for (const dep of service.dependsOn) {
-        if (!idSet.has(dep)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Service "${service.id}" depends on unknown service "${dep}"`,
-            path: ['services', index, 'dependsOn'],
-          });
-        }
-        if (dep === service.id) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Service "${service.id}" cannot depend on itself`,
-            path: ['services', index, 'dependsOn'],
-          });
-        }
-      }
+      validateDependencies(service, index, idSet, ctx);
+      validateServiceScripts(service, index, ctx);
     }
   });
 

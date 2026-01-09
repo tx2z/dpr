@@ -121,6 +121,174 @@ describe('parseConfig', () => {
     };
     expect(() => parseConfig(config)).toThrow();
   });
+
+  describe('scripts', () => {
+    it('should parse service with scripts', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [
+              { id: 'reset', name: 'Reset DB', command: 'npm run db:reset' },
+              { id: 'seed', name: 'Seed DB', command: 'npm run db:seed', key: 's' },
+            ],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      const result = parseConfig(config);
+      expect(result.services[0]?.scripts).toHaveLength(2);
+      expect(result.services[0]?.scripts[0]?.id).toBe('reset');
+      expect(result.services[0]?.scripts[0]?.name).toBe('Reset DB');
+      expect(result.services[0]?.scripts[1]?.key).toBe('s');
+    });
+
+    it('should default scripts to empty array', () => {
+      const result = parseConfig({
+        services: [
+          { id: 'api', start: 'npm run api' },
+          { id: 'web', start: 'npm run web' },
+        ],
+      });
+      expect(result.services[0]?.scripts).toEqual([]);
+    });
+
+    it('should parse scripts with params', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [
+              {
+                id: 'migrate',
+                name: 'New Migration',
+                command: 'npm run migrate {name}',
+                key: 'm',
+                params: [{ id: 'name', prompt: 'Migration name' }],
+              },
+            ],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      const result = parseConfig(config);
+      expect(result.services[0]?.scripts[0]?.params).toHaveLength(1);
+      expect(result.services[0]?.scripts[0]?.params[0]?.id).toBe('name');
+      expect(result.services[0]?.scripts[0]?.params[0]?.prompt).toBe('Migration name');
+    });
+
+    it('should reject script with empty id', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [{ id: '', name: 'Reset', command: 'npm run reset' }],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow();
+    });
+
+    it('should reject script with invalid id characters', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [{ id: 'reset db', name: 'Reset', command: 'npm run reset' }],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow();
+    });
+
+    it('should reject duplicate script IDs within a service', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [
+              { id: 'reset', name: 'Reset 1', command: 'npm run reset1' },
+              { id: 'reset', name: 'Reset 2', command: 'npm run reset2' },
+            ],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow(/Duplicate script IDs/);
+    });
+
+    it('should reject duplicate script keys within a service', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [
+              { id: 'reset', name: 'Reset', command: 'npm run reset', key: 'r' },
+              { id: 'rebuild', name: 'Rebuild', command: 'npm run rebuild', key: 'r' },
+            ],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow(/Duplicate script keys/);
+    });
+
+    it('should reject script key with invalid characters', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [{ id: 'reset', name: 'Reset', command: 'npm run reset', key: '!' }],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow();
+    });
+
+    it('should reject script key with multiple characters', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [{ id: 'reset', name: 'Reset', command: 'npm run reset', key: 'ab' }],
+          },
+          { id: 'web', start: 'npm run web' },
+        ],
+      };
+      expect(() => parseConfig(config)).toThrow();
+    });
+
+    it('should allow same script IDs in different services', () => {
+      const config = {
+        services: [
+          {
+            id: 'api',
+            start: 'npm run api',
+            scripts: [{ id: 'reset', name: 'Reset API', command: 'npm run api:reset' }],
+          },
+          {
+            id: 'web',
+            start: 'npm run web',
+            scripts: [{ id: 'reset', name: 'Reset Web', command: 'npm run web:reset' }],
+          },
+        ],
+      };
+      const result = parseConfig(config);
+      expect(result.services[0]?.scripts[0]?.id).toBe('reset');
+      expect(result.services[1]?.scripts[0]?.id).toBe('reset');
+    });
+  });
 });
 
 describe('assignDefaultColors', () => {

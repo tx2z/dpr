@@ -1,17 +1,31 @@
+import { spawn } from 'node:child_process';
+
 import { Box, useApp, useInput } from 'ink';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useStore } from 'zustand';
 
-import { Footer, FullscreenOverlay, Header, HelpOverlay, Layout } from './components/index.js';
+import {
+  Footer,
+  FullscreenOverlay,
+  Header,
+  HelpOverlay,
+  Layout,
+  ScriptHistoryOverlay,
+  ScriptOutputOverlay,
+  ScriptsOverlay,
+} from './components/index.js';
 import { useCommands, useMouse, useSearch, useServiceManager } from './hooks/index.js';
 import { createAppStore } from './store/index.js';
 
 import type { ServiceDisplay } from './components/index.js';
-import type { Config, ServiceState } from './config/index.js';
+import type { Config, ScriptExecution, ServiceState } from './config/index.js';
 import type { UseCommandsResult, UseSearchResult, UseServiceManagerResult } from './hooks/index.js';
 import type {
   AppMode,
   AppStoreApi,
+  ScriptHistoryState,
+  ScriptsMenuState,
+  ScriptOutputState,
   SearchMatch,
   SearchState,
   ServiceRuntime,
@@ -42,6 +56,27 @@ interface KeyHandlers {
   readonly startFocusedService: () => void;
   readonly stopFocusedService: () => void;
   readonly killFocusedService: () => void;
+  // Scripts actions
+  readonly openScriptsMenu: () => void;
+  readonly closeScriptsMenu: () => void;
+  readonly openServiceHistory: () => void;
+  readonly openAllHistory: () => void;
+  readonly closeHistory: () => void;
+  readonly closeScriptOutput: () => void;
+  // Scripts menu navigation
+  readonly scriptsMenuUp: () => void;
+  readonly scriptsMenuDown: () => void;
+  readonly scriptsMenuSelect: () => void;
+  readonly scriptsMenuInput: (char: string) => void;
+  readonly scriptsMenuBackspace: () => void;
+  readonly scriptsMenuSelectByKey: (key: string) => void;
+  // Script history navigation
+  readonly historyUp: () => void;
+  readonly historyDown: () => void;
+  readonly historyScrollUp: () => void;
+  readonly historyScrollDown: () => void;
+  readonly historyScrollToTop: () => void;
+  readonly historyScrollToBottom: () => void;
 }
 
 interface KeyState {
@@ -198,6 +233,82 @@ function handleFullscreenModeInput(input: string, key: KeyState, handlers: KeyHa
   }
 }
 
+function handleScriptOutputModeInput(key: KeyState, handlers: KeyHandlers): void {
+  if (key.escape) {
+    handlers.closeScriptOutput();
+  }
+}
+
+function handleScriptHistoryModeInput(input: string, key: KeyState, handlers: KeyHandlers): void {
+  if (key.escape) {
+    handlers.closeHistory();
+    return;
+  }
+  // Up/down arrows navigate the execution list
+  if (key.upArrow || input === 'k') {
+    handlers.historyUp();
+    return;
+  }
+  if (key.downArrow || input === 'j') {
+    handlers.historyDown();
+    return;
+  }
+  // Left/right arrows scroll the output pane
+  if (key.leftArrow) {
+    handlers.historyScrollUp();
+    return;
+  }
+  if (key.rightArrow) {
+    handlers.historyScrollDown();
+    return;
+  }
+  if (input === 'g') {
+    handlers.historyScrollToTop();
+    return;
+  }
+  if (input === 'G') {
+    handlers.historyScrollToBottom();
+  }
+}
+
+function handleScriptsModeInput(
+  input: string,
+  key: KeyState,
+  handlers: KeyHandlers,
+  isCollectingParams: boolean,
+): void {
+  if (key.escape) {
+    handlers.closeScriptsMenu();
+    return;
+  }
+  if (key.upArrow) {
+    handlers.scriptsMenuUp();
+    return;
+  }
+  if (key.downArrow) {
+    handlers.scriptsMenuDown();
+    return;
+  }
+  if (key.return) {
+    handlers.scriptsMenuSelect();
+    return;
+  }
+  if (isCollectingParams) {
+    if (key.backspace || key.delete) {
+      handlers.scriptsMenuBackspace();
+      return;
+    }
+    if (isTypableInput(input, key)) {
+      handlers.scriptsMenuInput(input);
+    }
+    return;
+  }
+  // Not collecting params - check for hotkey
+  if (isTypableInput(input, key)) {
+    handlers.scriptsMenuSelectByKey(input);
+  }
+}
+
 function handleTabNavigation(
   key: KeyState,
   serviceCount: number,
@@ -270,6 +381,16 @@ function handleServiceActions(
     handlers.killFocusedService();
     return true;
   }
+  // r to open scripts menu
+  if (input === 'r') {
+    handlers.openScriptsMenu();
+    return true;
+  }
+  // h to open service script history
+  if (input === 'h') {
+    handlers.openServiceHistory();
+    return true;
+  }
   return false;
 }
 
@@ -280,6 +401,11 @@ function handleGlobalCommands(input: string, handlers: KeyHandlers): boolean {
   }
   if (input === 'X') {
     handlers.stopAll();
+    return true;
+  }
+  // H for all services script history
+  if (input === 'H') {
+    handlers.openAllHistory();
     return true;
   }
   return false;
@@ -410,6 +536,10 @@ interface AppState {
   mode: AppMode;
   commandInput: string;
   searchState: SearchState | null;
+  scriptsMenuState: ScriptsMenuState | null;
+  scriptOutputState: ScriptOutputState | null;
+  scriptHistoryState: ScriptHistoryState | null;
+  scriptHistory: readonly ScriptExecution[];
 }
 
 interface AppActions {
@@ -426,8 +556,23 @@ function useAppState(store: AppStoreApi): AppState {
   const mode = useStore(store, (s) => s.mode);
   const commandInput = useStore(store, (s) => s.commandInput);
   const searchState = useStore(store, (s) => s.searchState);
+  const scriptsMenuState = useStore(store, (s) => s.scriptsMenuState);
+  const scriptOutputState = useStore(store, (s) => s.scriptOutputState);
+  const scriptHistoryState = useStore(store, (s) => s.scriptHistoryState);
+  const scriptHistory = useStore(store, (s) => s.scriptHistory);
 
-  return { config, services, focusedSpaceIndex, mode, commandInput, searchState };
+  return {
+    config,
+    services,
+    focusedSpaceIndex,
+    mode,
+    commandInput,
+    searchState,
+    scriptsMenuState,
+    scriptOutputState,
+    scriptHistoryState,
+    scriptHistory,
+  };
 }
 
 function useAppActions(store: AppStoreApi): AppActions {
@@ -473,6 +618,20 @@ function dispatchInput(input: string, key: KeyState, state: AppState, handlers: 
     handleFullscreenModeInput(input, key, handlers);
     return;
   }
+  if (state.mode === 'scriptOutput') {
+    handleScriptOutputModeInput(key, handlers);
+    return;
+  }
+  if (state.mode === 'scriptHistory') {
+    handleScriptHistoryModeInput(input, key, handlers);
+    return;
+  }
+  if (state.mode === 'scripts') {
+    const isCollectingParams =
+      state.scriptsMenuState !== null && state.scriptsMenuState.currentParamIndex >= 0;
+    handleScriptsModeInput(input, key, handlers, isCollectingParams);
+    return;
+  }
   handleNormalModeInput(
     input,
     key,
@@ -496,6 +655,17 @@ interface ServiceActionContext {
   readonly killService: (serviceId: string) => void;
   readonly startAll: () => void;
   readonly stopAll: () => void;
+}
+
+interface ScriptsContext {
+  readonly store: AppStoreApi;
+  readonly config: Config;
+  readonly focusedSpaceIndex: number | null;
+  readonly runScript: (
+    serviceId: string,
+    scriptIndex: number,
+    params: Record<string, string>,
+  ) => void;
 }
 
 function createServiceActionHandlers(
@@ -608,6 +778,236 @@ function createScrollHandlers(ctx: ScrollContext): Pick<KeyHandlers, ScrollHandl
   };
 }
 
+type ScriptsHandlerKeys =
+  | 'openScriptsMenu'
+  | 'closeScriptsMenu'
+  | 'openServiceHistory'
+  | 'openAllHistory'
+  | 'closeHistory'
+  | 'closeScriptOutput'
+  | 'scriptsMenuUp'
+  | 'scriptsMenuDown'
+  | 'scriptsMenuSelect'
+  | 'scriptsMenuInput'
+  | 'scriptsMenuBackspace'
+  | 'scriptsMenuSelectByKey'
+  | 'historyUp'
+  | 'historyDown'
+  | 'historyScrollUp'
+  | 'historyScrollDown'
+  | 'historyScrollToTop'
+  | 'historyScrollToBottom';
+
+interface ScriptsInfo {
+  scripts: Config['services'][0]['scripts'];
+  serviceId: string;
+}
+
+function getScriptsForCurrentMenu(ctx: ScriptsContext): ScriptsInfo | null {
+  const state = ctx.store.getState();
+  if (state.scriptsMenuState === null) return null;
+  const service = ctx.config.services.find((s) => s.id === state.scriptsMenuState?.serviceId);
+  if (service === undefined) return null;
+  return { scripts: service.scripts, serviceId: service.id };
+}
+
+function handleScriptSelect(ctx: ScriptsContext): void {
+  const state = ctx.store.getState();
+  if (state.scriptsMenuState === null) return;
+  const info = getScriptsForCurrentMenu(ctx);
+  if (info === null) return;
+  const script = info.scripts[state.scriptsMenuState.selectedIndex];
+  if (script === undefined) return;
+  // If script has params and we haven't started collecting, start collecting
+  if (script.params.length > 0 && state.scriptsMenuState.currentParamIndex < 0) {
+    ctx.store.setState({ scriptsMenuState: { ...state.scriptsMenuState, currentParamIndex: 0 } });
+    return;
+  }
+  // If collecting params, advance or run
+  if (state.scriptsMenuState.currentParamIndex >= 0) {
+    state.advanceScriptsMenuParam();
+    const newState = ctx.store.getState();
+    if (
+      newState.scriptsMenuState !== null &&
+      newState.scriptsMenuState.currentParamIndex >= script.params.length
+    ) {
+      // All params collected, run the script (openScriptOutput clears menu state)
+      ctx.runScript(
+        info.serviceId,
+        state.scriptsMenuState.selectedIndex,
+        newState.scriptsMenuState.paramValues,
+      );
+    }
+    return;
+  }
+  // No params, run immediately (openScriptOutput clears menu state)
+  ctx.runScript(info.serviceId, state.scriptsMenuState.selectedIndex, {});
+}
+
+function handleScriptKeySelect(ctx: ScriptsContext, key: string): void {
+  const state = ctx.store.getState();
+  if (state.scriptsMenuState === null) return;
+  const info = getScriptsForCurrentMenu(ctx);
+  if (info === null) return;
+  const scriptIndex = info.scripts.findIndex((s) => s.key === key);
+  if (scriptIndex >= 0) {
+    const script = info.scripts[scriptIndex];
+    if (script !== undefined && script.params.length > 0) {
+      // Has params, start collecting
+      ctx.store.setState({
+        scriptsMenuState: {
+          ...state.scriptsMenuState,
+          selectedIndex: scriptIndex,
+          currentParamIndex: 0,
+        },
+      });
+    } else {
+      // No params, run immediately (openScriptOutput clears menu state)
+      ctx.runScript(info.serviceId, scriptIndex, {});
+    }
+  }
+}
+
+type ScriptsMenuKeys =
+  | 'scriptsMenuUp'
+  | 'scriptsMenuDown'
+  | 'scriptsMenuSelect'
+  | 'scriptsMenuInput'
+  | 'scriptsMenuBackspace'
+  | 'scriptsMenuSelectByKey';
+
+function createScriptsMenuHandlers(ctx: ScriptsContext): Pick<KeyHandlers, ScriptsMenuKeys> {
+  return {
+    scriptsMenuUp: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptsMenuState === null) return;
+      const info = getScriptsForCurrentMenu(ctx);
+      if (info === null || info.scripts.length === 0) return;
+      const newIndex =
+        (state.scriptsMenuState.selectedIndex - 1 + info.scripts.length) % info.scripts.length;
+      state.setScriptsMenuSelection(newIndex);
+    },
+    scriptsMenuDown: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptsMenuState === null) return;
+      const info = getScriptsForCurrentMenu(ctx);
+      if (info === null || info.scripts.length === 0) return;
+      const newIndex = (state.scriptsMenuState.selectedIndex + 1) % info.scripts.length;
+      state.setScriptsMenuSelection(newIndex);
+    },
+    scriptsMenuSelect: (): void => {
+      handleScriptSelect(ctx);
+    },
+    scriptsMenuInput: (char: string): void => {
+      const state = ctx.store.getState();
+      if (state.scriptsMenuState === null) return;
+      state.setScriptsMenuInput(state.scriptsMenuState.inputValue + char);
+    },
+    scriptsMenuBackspace: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptsMenuState === null) return;
+      state.setScriptsMenuInput(state.scriptsMenuState.inputValue.slice(0, -1));
+    },
+    scriptsMenuSelectByKey: (key: string): void => {
+      handleScriptKeySelect(ctx, key);
+    },
+  };
+}
+
+function getHistoryExecutionCount(ctx: ScriptsContext): number {
+  const state = ctx.store.getState();
+  if (state.scriptHistoryState === null) return 0;
+  if (state.scriptHistoryState.serviceFilter !== null) {
+    return state.scriptHistory.filter(
+      (e) => e.serviceId === state.scriptHistoryState?.serviceFilter,
+    ).length;
+  }
+  return state.scriptHistory.length;
+}
+
+type HistoryHandlerKeys =
+  | 'historyUp'
+  | 'historyDown'
+  | 'historyScrollUp'
+  | 'historyScrollDown'
+  | 'historyScrollToTop'
+  | 'historyScrollToBottom';
+
+function createHistoryHandlers(ctx: ScriptsContext): Pick<KeyHandlers, HistoryHandlerKeys> {
+  return {
+    historyUp: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptHistoryState === null) return;
+      const count = getHistoryExecutionCount(ctx);
+      if (count === 0) return;
+      const newIndex = (state.scriptHistoryState.selectedIndex - 1 + count) % count;
+      state.setScriptHistorySelection(newIndex);
+      state.setScriptHistoryScroll(0); // Reset scroll when changing selection
+    },
+    historyDown: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptHistoryState === null) return;
+      const count = getHistoryExecutionCount(ctx);
+      if (count === 0) return;
+      const newIndex = (state.scriptHistoryState.selectedIndex + 1) % count;
+      state.setScriptHistorySelection(newIndex);
+      state.setScriptHistoryScroll(0); // Reset scroll when changing selection
+    },
+    historyScrollUp: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptHistoryState === null) return;
+      state.setScriptHistoryScroll(Math.max(0, state.scriptHistoryState.scrollOffset - 5));
+    },
+    historyScrollDown: (): void => {
+      const state = ctx.store.getState();
+      if (state.scriptHistoryState === null) return;
+      state.setScriptHistoryScroll(state.scriptHistoryState.scrollOffset + 5);
+    },
+    historyScrollToTop: (): void => {
+      ctx.store.getState().setScriptHistoryScroll(0);
+    },
+    historyScrollToBottom: (): void => {
+      ctx.store.getState().setScriptHistoryScroll(9999);
+    },
+  };
+}
+
+function createScriptsHandlers(ctx: ScriptsContext): Pick<KeyHandlers, ScriptsHandlerKeys> {
+  const getFocusedServiceId = (): string | null => {
+    if (ctx.focusedSpaceIndex === null) return null;
+    const service = ctx.config.services[ctx.focusedSpaceIndex];
+    return service?.id ?? null;
+  };
+
+  const menuHandlers = createScriptsMenuHandlers(ctx);
+  const historyHandlers = createHistoryHandlers(ctx);
+
+  return {
+    openScriptsMenu: (): void => {
+      const serviceId = getFocusedServiceId();
+      if (serviceId !== null) ctx.store.getState().openScriptsMenu(serviceId);
+    },
+    closeScriptsMenu: (): void => {
+      ctx.store.getState().closeScriptsMenu();
+    },
+    openServiceHistory: (): void => {
+      const serviceId = getFocusedServiceId();
+      if (serviceId !== null) ctx.store.getState().openScriptHistory(serviceId);
+    },
+    openAllHistory: (): void => {
+      ctx.store.getState().openScriptHistory(null);
+    },
+    closeHistory: (): void => {
+      ctx.store.getState().closeScriptHistory();
+    },
+    closeScriptOutput: (): void => {
+      ctx.store.getState().closeScriptOutput();
+    },
+    ...menuHandlers,
+    ...historyHandlers,
+  };
+}
+
 function useKeyHandlers(
   actions: AppActions,
   quit: () => void,
@@ -615,10 +1015,12 @@ function useKeyHandlers(
   search: UseSearchResult,
   scrollCtx: ScrollContext,
   serviceCtx: ServiceActionContext,
+  scriptsCtx: ScriptsContext,
 ): KeyHandlers {
   return useMemo(() => {
     const scrollHandlers = createScrollHandlers(scrollCtx);
     const serviceHandlers = createServiceActionHandlers(serviceCtx);
+    const scriptsHandlers = createScriptsHandlers(scriptsCtx);
     return {
       ...actions,
       quit,
@@ -628,6 +1030,7 @@ function useKeyHandlers(
       prevMatch: search.prevMatch,
       ...scrollHandlers,
       ...serviceHandlers,
+      ...scriptsHandlers,
     };
   }, [
     actions,
@@ -638,6 +1041,7 @@ function useKeyHandlers(
     search.prevMatch,
     scrollCtx,
     serviceCtx,
+    scriptsCtx,
   ]);
 }
 
@@ -663,6 +1067,17 @@ function useServiceContext(
       stopAll: serviceManager.stopAll,
     }),
     [state.config, state.focusedSpaceIndex, serviceManager],
+  );
+}
+
+function useScriptsContext(
+  store: AppStoreApi,
+  state: AppState,
+  runScript: (serviceId: string, scriptIndex: number, params: Record<string, string>) => void,
+): ScriptsContext {
+  return useMemo(
+    () => ({ store, config: state.config, focusedSpaceIndex: state.focusedSpaceIndex, runScript }),
+    [store, state.config, state.focusedSpaceIndex, runScript],
   );
 }
 
@@ -820,9 +1235,162 @@ function useMouseSupport(state: AppState, handlersRef: React.RefObject<KeyHandle
   useMouse(mouseHandlers, mouseEnabled);
 }
 
+function renderScriptOverlays(state: AppState, store: AppStoreApi): React.ReactElement | null {
+  if (state.mode === 'scripts' && state.scriptsMenuState !== null) {
+    const serviceConfig = state.config.services.find(
+      (s) => s.id === state.scriptsMenuState?.serviceId,
+    );
+    if (serviceConfig !== undefined) {
+      return <ScriptsOverlay serviceConfig={serviceConfig} menuState={state.scriptsMenuState} />;
+    }
+  }
+
+  if (state.mode === 'scriptOutput' && state.scriptOutputState !== null) {
+    const execution = store.getState().getScriptExecution(state.scriptOutputState.executionId);
+    if (execution !== undefined) {
+      return <ScriptOutputOverlay execution={execution} />;
+    }
+  }
+
+  if (state.mode === 'scriptHistory' && state.scriptHistoryState !== null) {
+    const executions =
+      state.scriptHistoryState.serviceFilter !== null
+        ? state.scriptHistory.filter((e) => e.serviceId === state.scriptHistoryState?.serviceFilter)
+        : state.scriptHistory;
+    return <ScriptHistoryOverlay historyState={state.scriptHistoryState} executions={executions} />;
+  }
+
+  return null;
+}
+
 interface AppContentProps {
   readonly store: AppStoreApi;
   readonly config: Config;
+}
+
+function substituteParams(
+  command: string,
+  params: Record<string, string>,
+  scriptParams: Config['services'][0]['scripts'][0]['params'],
+): string {
+  let result = command;
+  for (const param of scriptParams) {
+    const value = params[`param_${String(scriptParams.indexOf(param))}`] ?? '';
+    result = result.replace(new RegExp(`\\{${param.id}\\}`, 'g'), value);
+  }
+  return result;
+}
+
+function createAutoCloseHandler(store: AppStoreApi, executionId: string): () => void {
+  return (): void => {
+    setTimeout(() => {
+      const currentState = store.getState();
+      if (
+        currentState.mode === 'scriptOutput' &&
+        currentState.scriptOutputState?.executionId === executionId
+      ) {
+        currentState.closeScriptOutput();
+      }
+    }, 3000);
+  };
+}
+
+function setupScriptProcess(
+  store: AppStoreApi,
+  executionId: string,
+  command: string,
+  service: Config['services'][0],
+): void {
+  const child = spawn(command, {
+    cwd: service.dir,
+    shell: true,
+    env: { ...process.env, ...service.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const handleData = (data: Buffer): void => {
+    const lines = data
+      .toString()
+      .split('\n')
+      .filter((l) => l.length > 0);
+    for (const line of lines) {
+      store.getState().updateScriptExecution(executionId, {
+        output: [...(store.getState().getScriptExecution(executionId)?.output ?? []), line],
+      });
+    }
+  };
+
+  child.stdout.on('data', handleData);
+  child.stderr.on('data', handleData);
+
+  const autoClose = createAutoCloseHandler(store, executionId);
+  child.on('exit', (code) => {
+    store.getState().updateScriptExecution(executionId, { endedAt: new Date(), exitCode: code });
+    autoClose();
+  });
+  child.on('error', () => {
+    store.getState().updateScriptExecution(executionId, { endedAt: new Date(), exitCode: null });
+    autoClose();
+  });
+}
+
+function executeScript(
+  config: Config,
+  store: AppStoreApi,
+  serviceId: string,
+  scriptIndex: number,
+  params: Record<string, string>,
+): void {
+  const service = config.services.find((s) => s.id === serviceId);
+  if (service === undefined) return;
+  const script = service.scripts[scriptIndex];
+  if (script === undefined) return;
+
+  const command = substituteParams(script.command, params, script.params);
+  const executionId = `exec_${String(Date.now())}_${Math.random().toString(36).slice(2, 9)}`;
+
+  store.getState().addScriptExecution({
+    id: executionId,
+    serviceId,
+    serviceName: service.name,
+    scriptId: script.id,
+    scriptName: script.name,
+    command,
+    startedAt: new Date(),
+    endedAt: null,
+    exitCode: null,
+    output: [],
+  });
+  store.getState().openScriptOutput(executionId);
+  setupScriptProcess(store, executionId, command, service);
+}
+
+function renderModeOverlay(
+  state: AppState,
+  store: AppStoreApi,
+  serviceDisplays: ServiceDisplay[],
+): React.ReactElement | null {
+  if (state.mode === 'help') {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Header projectName={state.config.global.name} />
+        <HelpOverlay />
+      </Box>
+    );
+  }
+  if (state.mode === 'fullscreen') {
+    return FullscreenView({ state, serviceDisplays });
+  }
+  const scriptOverlay = renderScriptOverlays(state, store);
+  if (scriptOverlay !== null) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Header projectName={state.config.global.name} />
+        {scriptOverlay}
+      </Box>
+    );
+  }
+  return null;
 }
 
 function AppContent({ store, config }: AppContentProps): React.ReactElement {
@@ -836,15 +1404,31 @@ function AppContent({ store, config }: AppContentProps): React.ReactElement {
   const quit = useCallback((): void => {
     serviceManager.stopAllAndWait(exit);
   }, [serviceManager, exit]);
+
+  const runScript = useCallback(
+    (serviceId: string, scriptIndex: number, params: Record<string, string>): void => {
+      executeScript(config, store, serviceId, scriptIndex, params);
+    },
+    [config, store],
+  );
+
   const scrollCtx = useScrollContext(store, state);
   const serviceCtx = useServiceContext(state, serviceManager);
-  const handlers = useKeyHandlers(actions, quit, commands, search, scrollCtx, serviceCtx);
+  const scriptsCtx = useScriptsContext(store, state, runScript);
+  const handlers = useKeyHandlers(
+    actions,
+    quit,
+    commands,
+    search,
+    scrollCtx,
+    serviceCtx,
+    scriptsCtx,
+  );
   const serviceDisplays = useMemo(
     () => buildServiceDisplays(state.config, state.services),
     [state.config, state.services],
   );
 
-  // Use refs to ensure useInput always has latest state and handlers
   const stateRef = useRef(state);
   const handlersRef = useRef(handlers);
   stateRef.current = state;
@@ -856,20 +1440,9 @@ function AppContent({ store, config }: AppContentProps): React.ReactElement {
 
   useMouseSupport(state, handlersRef);
 
-  if (state.mode === 'help') {
-    return (
-      <Box flexDirection="column" flexGrow={1}>
-        <Header projectName={state.config.global.name} />
-        <HelpOverlay />
-      </Box>
-    );
-  }
-
-  if (state.mode === 'fullscreen') {
-    const fullscreenView = FullscreenView({ state, serviceDisplays });
-    if (fullscreenView !== null) {
-      return fullscreenView;
-    }
+  const overlay = renderModeOverlay(state, store, serviceDisplays);
+  if (overlay !== null) {
+    return overlay;
   }
 
   return (

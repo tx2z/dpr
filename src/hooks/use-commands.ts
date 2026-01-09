@@ -201,6 +201,18 @@ function createHelpCommand(store: AppStoreApi): Command {
   };
 }
 
+function createHistoryCommand(store: AppStoreApi): Command {
+  return {
+    name: 'history',
+    aliases: ['H'],
+    description: 'Show script execution history',
+    usage: '/history',
+    execute: (): void => {
+      store.getState().openScriptHistory(null);
+    },
+  };
+}
+
 function matchesCommand(cmd: Command, query: string): boolean {
   const lowerQuery = query.toLowerCase();
   if (cmd.name.toLowerCase().startsWith(lowerQuery)) {
@@ -257,6 +269,7 @@ function createAllCommands(
     createFocusCommand(config, store),
     createQuitCommand(exit, serviceManager),
     createHelpCommand(store),
+    createHistoryCommand(store),
   ];
 }
 

@@ -19,11 +19,12 @@ export function HelpOverlay(): React.ReactElement {
         <Text bold>panel actions (when focused)</Text>
       </Box>
       <Text>[s] start · [x] stop · [K] kill · [Enter] fullscreen · [Esc] unfocus</Text>
+      <Text>[r] scripts menu · [h] script history</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>global actions</Text>
       </Box>
-      <Text>[S] start all · [X] stop all · [q] quit</Text>
+      <Text>[S] start all · [X] stop all · [H] all script history · [q] quit</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>commands (press [/])</Text>

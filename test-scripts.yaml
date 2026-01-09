@@ -1,0 +1,129 @@
+name: "Scripts Feature Test"
+columns: 2
+logs: true
+logsDir: ~/.dpr/logs/test
+
+services:
+  - id: service-a
+    name: "Service Alpha"
+    start: "echo 'Alpha starting...' && sleep 1 && echo 'Alpha ready!' && while true; do echo \"[$(date +%H:%M:%S)] Alpha alive\"; sleep 3; done"
+    autostart: true
+    color: green
+    readyPattern: "Alpha ready!"
+    scripts:
+      # Quick script with hotkey
+      - id: ping
+        name: "Ping Test"
+        command: "echo 'Pinging...' && sleep 0.5 && echo 'Pong! Response time: 42ms'"
+        key: p
+
+      # Script that produces multiple lines of output
+      - id: status
+        name: "Status Check"
+        command: |
+          echo "=== Service Alpha Status ==="
+          echo "Checking memory..."
+          sleep 0.3
+          echo "Memory: OK (256MB used)"
+          echo "Checking CPU..."
+          sleep 0.3
+          echo "CPU: OK (5% usage)"
+          echo "Checking connections..."
+          sleep 0.3
+          echo "Connections: 3 active"
+          echo "=== All checks passed ==="
+        key: s
+
+      # Longer running script to test "Running..." state
+      - id: slow-task
+        name: "Slow Task (3s)"
+        command: |
+          echo "Starting slow task..."
+          for i in 1 2 3; do
+            echo "Processing step $i of 3..."
+            sleep 1
+          done
+          echo "Slow task complete!"
+
+      # Script with lots of output to test scrolling
+      - id: long-output
+        name: "Long Output (50 lines)"
+        command: |
+          echo "=== Starting Long Output Test ==="
+          echo ""
+          for i in $(seq 1 50); do
+            printf "Line %02d: " $i
+            echo "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor."
+          done
+          echo ""
+          echo "=== End of Long Output Test ==="
+        key: l
+
+  - id: service-b
+    name: "Service Beta"
+    start: "echo 'Beta starting...' && sleep 1 && echo 'Beta ready!' && while true; do echo \"[$(date +%H:%M:%S)] Beta alive\"; sleep 4; done"
+    autostart: true
+    color: blue
+    readyPattern: "Beta ready!"
+    scripts:
+      # Script with a parameter
+      - id: greet
+        name: "Greet User"
+        command: "echo 'Hello, {name}! Welcome to Service Beta.'"
+        key: g
+        params:
+          - id: name
+            prompt: "Enter your name"
+
+      # Script with multiple parameters
+      - id: send-message
+        name: "Send Message"
+        command: |
+          echo "=== Sending Message ==="
+          echo "To: {recipient}"
+          echo "Subject: {subject}"
+          echo "---"
+          echo "Message sent successfully!"
+        key: m
+        params:
+          - id: recipient
+            prompt: "Recipient email"
+          - id: subject
+            prompt: "Message subject"
+
+      # Script that "fails" (exit code 1)
+      - id: fail-test
+        name: "Failure Test"
+        command: "echo 'This script will fail...' && sleep 0.5 && echo 'Error: Something went wrong!' && exit 1"
+        key: f
+
+  - id: service-c
+    name: "Service Gamma"
+    start: "echo 'Gamma starting...' && sleep 1 && echo 'Gamma ready!' && while true; do echo \"[$(date +%H:%M:%S)] Gamma alive\"; sleep 5; done"
+    autostart: false
+    color: yellow
+    readyPattern: "Gamma ready!"
+    scripts:
+      # List files script
+      - id: list-files
+        name: "List Current Dir"
+        command: "echo 'Files in current directory:' && ls -la | head -20"
+        key: l
+
+      # Show date/time
+      - id: datetime
+        name: "Show Date/Time"
+        command: "echo 'Current date and time:' && date '+%Y-%m-%d %H:%M:%S %Z'"
+        key: d
+
+      # Environment info
+      - id: env-info
+        name: "Environment Info"
+        command: |
+          echo "=== Environment Info ==="
+          echo "User: $USER"
+          echo "Shell: $SHELL"
+          echo "PWD: $PWD"
+          echo "Node: $(node --version 2>/dev/null || echo 'not found')"
+          echo "NPM: $(npm --version 2>/dev/null || echo 'not found')"
+        key: e

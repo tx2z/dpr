@@ -26,3 +26,12 @@ export { HelpOverlay } from './help-overlay.js';
 
 export { FullscreenOverlay } from './fullscreen-overlay.js';
 export type { FullscreenOverlayProps } from './fullscreen-overlay.js';
+
+export { ScriptsOverlay } from './scripts-overlay.js';
+export type { ScriptsOverlayProps } from './scripts-overlay.js';
+
+export { ScriptOutputOverlay } from './script-output-overlay.js';
+export type { ScriptOutputOverlayProps } from './script-output-overlay.js';
+
+export { ScriptHistoryOverlay } from './script-history-overlay.js';
+export type { ScriptHistoryOverlayProps } from './script-history-overlay.js';

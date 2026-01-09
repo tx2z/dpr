@@ -3,6 +3,7 @@ import { createStore } from 'zustand';
 import type {
   Config,
   LogLine,
+  ScriptExecution,
   ServiceConfig,
   ServiceState,
   ServiceStatus,
@@ -23,7 +24,45 @@ export interface SearchState {
   readonly currentMatchIndex: number;
 }
 
-export type AppMode = 'normal' | 'command' | 'search' | 'help' | 'fullscreen';
+export type AppMode =
+  | 'normal'
+  | 'command'
+  | 'search'
+  | 'help'
+  | 'fullscreen'
+  | 'scripts'
+  | 'scriptOutput'
+  | 'scriptHistory';
+
+/**
+ * State for the scripts menu overlay.
+ * Tracks which service's scripts are shown and navigation state.
+ */
+export interface ScriptsMenuState {
+  readonly serviceId: string;
+  readonly selectedIndex: number;
+  readonly paramValues: Readonly<Record<string, string>>;
+  readonly currentParamIndex: number;
+  readonly inputValue: string;
+}
+
+/**
+ * State for the script output overlay.
+ * Shows the currently running or just-completed script's output.
+ */
+export interface ScriptOutputState {
+  readonly executionId: string;
+}
+
+/**
+ * State for the script history overlay.
+ * Can show history for a single service or all services.
+ */
+export interface ScriptHistoryState {
+  readonly serviceFilter: string | null;
+  readonly selectedIndex: number;
+  readonly scrollOffset: number;
+}
 
 export interface ServiceRuntime {
   readonly state: ServiceState;
@@ -38,6 +77,10 @@ interface AppState {
   readonly mode: AppMode;
   readonly commandInput: string;
   readonly searchState: SearchState | null;
+  readonly scriptsMenuState: ScriptsMenuState | null;
+  readonly scriptOutputState: ScriptOutputState | null;
+  readonly scriptHistoryState: ScriptHistoryState | null;
+  readonly scriptHistory: readonly ScriptExecution[];
 }
 
 interface AppActions {
@@ -53,6 +96,21 @@ interface AppActions {
   getServiceById: (serviceId: string) => ServiceConfig | undefined;
   getServiceByIndex: (index: number) => ServiceConfig | undefined;
   getServiceRuntime: (serviceId: string) => ServiceRuntime | undefined;
+  // Scripts actions
+  openScriptsMenu: (serviceId: string) => void;
+  closeScriptsMenu: () => void;
+  setScriptsMenuSelection: (index: number) => void;
+  setScriptsMenuInput: (value: string) => void;
+  advanceScriptsMenuParam: () => void;
+  openScriptOutput: (executionId: string) => void;
+  closeScriptOutput: () => void;
+  openScriptHistory: (serviceFilter: string | null) => void;
+  closeScriptHistory: () => void;
+  setScriptHistorySelection: (index: number) => void;
+  setScriptHistoryScroll: (offset: number) => void;
+  addScriptExecution: (execution: ScriptExecution) => void;
+  updateScriptExecution: (id: string, updates: Partial<ScriptExecution>) => void;
+  getScriptExecution: (id: string) => ScriptExecution | undefined;
 }
 
 export type AppStore = AppState & AppActions;
@@ -164,6 +222,150 @@ function createSetScrollOffset(set: SetState) {
   };
 }
 
+function updateScriptsMenuSelection(state: AppState, index: number): Partial<AppState> {
+  if (state.scriptsMenuState === null) return state;
+  return { scriptsMenuState: { ...state.scriptsMenuState, selectedIndex: index } };
+}
+
+function updateScriptsMenuInput(state: AppState, value: string): Partial<AppState> {
+  if (state.scriptsMenuState === null) return state;
+  return { scriptsMenuState: { ...state.scriptsMenuState, inputValue: value } };
+}
+
+function advanceScriptsParam(state: AppState): Partial<AppState> {
+  if (state.scriptsMenuState === null) return state;
+  const { currentParamIndex, inputValue, paramValues } = state.scriptsMenuState;
+  const paramId = `param_${String(currentParamIndex)}`;
+  return {
+    scriptsMenuState: {
+      ...state.scriptsMenuState,
+      currentParamIndex: currentParamIndex + 1,
+      paramValues: { ...paramValues, [paramId]: inputValue },
+      inputValue: '',
+    },
+  };
+}
+
+function createScriptsMenuActions(
+  set: SetState,
+): Pick<
+  AppActions,
+  | 'openScriptsMenu'
+  | 'closeScriptsMenu'
+  | 'setScriptsMenuSelection'
+  | 'setScriptsMenuInput'
+  | 'advanceScriptsMenuParam'
+> {
+  return {
+    openScriptsMenu: (serviceId): void => {
+      set({
+        mode: 'scripts',
+        scriptsMenuState: {
+          serviceId,
+          selectedIndex: 0,
+          paramValues: {},
+          currentParamIndex: -1,
+          inputValue: '',
+        },
+      });
+    },
+    closeScriptsMenu: (): void => {
+      set({ mode: 'normal', scriptsMenuState: null });
+    },
+    setScriptsMenuSelection: (index): void => {
+      set((s) => updateScriptsMenuSelection(s, index));
+    },
+    setScriptsMenuInput: (value): void => {
+      set((s) => updateScriptsMenuInput(s, value));
+    },
+    advanceScriptsMenuParam: (): void => {
+      set(advanceScriptsParam);
+    },
+  };
+}
+
+function createScriptOutputActions(
+  set: SetState,
+): Pick<AppActions, 'openScriptOutput' | 'closeScriptOutput'> {
+  return {
+    openScriptOutput: (executionId): void => {
+      set({ mode: 'scriptOutput', scriptOutputState: { executionId }, scriptsMenuState: null });
+    },
+    closeScriptOutput: (): void => {
+      set({ mode: 'normal', scriptOutputState: null });
+    },
+  };
+}
+
+function createScriptHistoryActions(
+  set: SetState,
+): Pick<
+  AppActions,
+  | 'openScriptHistory'
+  | 'closeScriptHistory'
+  | 'setScriptHistorySelection'
+  | 'setScriptHistoryScroll'
+> {
+  return {
+    openScriptHistory: (serviceFilter): void => {
+      set({
+        mode: 'scriptHistory',
+        scriptHistoryState: { serviceFilter, selectedIndex: 0, scrollOffset: 0 },
+      });
+    },
+    closeScriptHistory: (): void => {
+      set({ mode: 'normal', scriptHistoryState: null });
+    },
+    setScriptHistorySelection: (index): void => {
+      set((state) => {
+        if (state.scriptHistoryState === null) {
+          return state;
+        }
+        return {
+          scriptHistoryState: { ...state.scriptHistoryState, selectedIndex: index },
+        };
+      });
+    },
+    setScriptHistoryScroll: (offset): void => {
+      set((state) => {
+        if (state.scriptHistoryState === null) {
+          return state;
+        }
+        return {
+          scriptHistoryState: { ...state.scriptHistoryState, scrollOffset: Math.max(0, offset) },
+        };
+      });
+    },
+  };
+}
+
+const SCRIPT_HISTORY_LIMIT = 100;
+
+function createScriptExecutionActions(
+  set: SetState,
+  get: GetState,
+): Pick<AppActions, 'addScriptExecution' | 'updateScriptExecution' | 'getScriptExecution'> {
+  return {
+    addScriptExecution: (execution): void => {
+      set((state) => {
+        const newHistory = [execution, ...state.scriptHistory];
+        const trimmed = newHistory.slice(0, SCRIPT_HISTORY_LIMIT);
+        return { scriptHistory: trimmed };
+      });
+    },
+    updateScriptExecution: (id, updates): void => {
+      set((state) => ({
+        scriptHistory: state.scriptHistory.map((exec) =>
+          exec.id === id ? { ...exec, ...updates } : exec,
+        ),
+      }));
+    },
+    getScriptExecution: (id): ScriptExecution | undefined => {
+      return get().scriptHistory.find((exec) => exec.id === id);
+    },
+  };
+}
+
 function createStoreActions(set: SetState, get: GetState): AppActions {
   const updateServiceState = createUpdateServiceState(set);
 
@@ -196,6 +398,10 @@ function createStoreActions(set: SetState, get: GetState): AppActions {
     getServiceRuntime: (serviceId): ServiceRuntime | undefined => {
       return get().services[serviceId];
     },
+    ...createScriptsMenuActions(set),
+    ...createScriptOutputActions(set),
+    ...createScriptHistoryActions(set),
+    ...createScriptExecutionActions(set, get),
   };
 }
 
@@ -209,6 +415,10 @@ export function createAppStore(config: Config): AppStoreApi {
     mode: 'normal',
     commandInput: '',
     searchState: null,
+    scriptsMenuState: null,
+    scriptOutputState: null,
+    scriptHistoryState: null,
+    scriptHistory: [],
     ...createStoreActions(set, get),
   }));
 }
