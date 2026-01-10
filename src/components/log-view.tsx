@@ -4,6 +4,11 @@ import React from 'react';
 import type { LogLine } from '../config/index.js';
 import type { SearchMatch } from '../store/index.js';
 
+export interface SelectionRange {
+  readonly startLine: number;
+  readonly endLine: number;
+}
+
 export interface LogViewProps {
   readonly lines: readonly LogLine[];
   readonly scrollOffset: number;
@@ -12,6 +17,8 @@ export interface LogViewProps {
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
   readonly serviceId: string;
+  readonly selectionRange?: SelectionRange | null;
+  readonly cursorLine?: number | null;
 }
 
 interface HighlightProps {
@@ -111,6 +118,14 @@ interface LogLineComponentProps {
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
   readonly serviceId: string;
+  readonly isSelected: boolean;
+  readonly isCursor: boolean;
+}
+
+function getSelectionBgColor(isCursor: boolean, isSelected: boolean): string | undefined {
+  if (isCursor) return 'cyan';
+  if (isSelected) return 'blue';
+  return undefined;
 }
 
 const LogLineComponent = React.memo(function LogLineComponent({
@@ -120,6 +135,8 @@ const LogLineComponent = React.memo(function LogLineComponent({
   searchMatches,
   currentMatchIndex,
   serviceId,
+  isSelected,
+  isCursor,
 }: LogLineComponentProps): React.ReactElement {
   const sanitizedContent = sanitizeLogContent(line.content);
   const content = (
@@ -132,23 +149,41 @@ const LogLineComponent = React.memo(function LogLineComponent({
       serviceId={serviceId}
     />
   );
+  const bgColor = getSelectionBgColor(isCursor, isSelected);
+  const textColor = line.stream === 'stderr' ? 'red' : undefined;
 
-  if (line.stream === 'stderr') {
+  if (bgColor !== undefined) {
     return (
       <Box key={lineIndex} overflowX="hidden">
-        <Text color="red" wrap="truncate">
-          {content}
+        <Text backgroundColor={bgColor} color={textColor ?? 'white'} wrap="truncate">
+          {isCursor ? '> ' : '  '}{content}
         </Text>
       </Box>
     );
   }
-
+  if (line.stream === 'stderr') {
+    return (
+      <Box key={lineIndex} overflowX="hidden">
+        <Text color="red" wrap="truncate">{content}</Text>
+      </Box>
+    );
+  }
   return (
     <Box key={lineIndex} overflowX="hidden">
       {content}
     </Box>
   );
 });
+
+function isLineSelected(
+  lineIndex: number,
+  selectionRange: SelectionRange | null | undefined,
+): boolean {
+  if (selectionRange === null || selectionRange === undefined) {
+    return false;
+  }
+  return lineIndex >= selectionRange.startLine && lineIndex <= selectionRange.endLine;
+}
 
 export function LogView({
   lines,
@@ -158,6 +193,8 @@ export function LogView({
   searchMatches,
   currentMatchIndex,
   serviceId,
+  selectionRange,
+  cursorLine,
 }: LogViewProps): React.ReactElement {
   // Clamp scrollOffset to valid range (0 to max that shows last line)
   const maxOffset = Math.max(0, lines.length - height);
@@ -167,17 +204,22 @@ export function LogView({
 
   return (
     <Box flexDirection="column" height={height}>
-      {visibleLines.map((line, index) => (
-        <LogLineComponent
-          key={effectiveOffset + index}
-          line={line}
-          lineIndex={effectiveOffset + index}
-          searchTerm={searchTerm}
-          searchMatches={searchMatches}
-          currentMatchIndex={currentMatchIndex}
-          serviceId={serviceId}
-        />
-      ))}
+      {visibleLines.map((line, index) => {
+        const lineIndex = effectiveOffset + index;
+        return (
+          <LogLineComponent
+            key={lineIndex}
+            line={line}
+            lineIndex={lineIndex}
+            searchTerm={searchTerm}
+            searchMatches={searchMatches}
+            currentMatchIndex={currentMatchIndex}
+            serviceId={serviceId}
+            isSelected={isLineSelected(lineIndex, selectionRange)}
+            isCursor={cursorLine === lineIndex}
+          />
+        );
+      })}
       {Array.from({ length: emptyLines }).map((_, index) => (
         <Box key={`empty-${String(index)}`}>
           <Text> </Text>

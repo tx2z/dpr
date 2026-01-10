@@ -16,6 +16,7 @@ import {
 } from './components/index.js';
 import { useCommands, useMouse, useSearch, useServiceManager } from './hooks/index.js';
 import { createAppStore } from './store/index.js';
+import { copyToClipboard } from './utils/index.js';
 
 import type { ServiceDisplay } from './components/index.js';
 import type { Config, ScriptExecution, ServiceState } from './config/index.js';
@@ -29,6 +30,7 @@ import type {
   SearchMatch,
   SearchState,
   ServiceRuntime,
+  VisualModeState,
 } from './store/index.js';
 
 export interface AppProps {
@@ -56,6 +58,8 @@ interface KeyHandlers {
   readonly startFocusedService: () => void;
   readonly stopFocusedService: () => void;
   readonly killFocusedService: () => void;
+  readonly copyVisibleLogs: () => void;
+  readonly copyAllLogs: () => void;
   // Scripts actions
   readonly openScriptsMenu: () => void;
   readonly closeScriptsMenu: () => void;
@@ -77,6 +81,12 @@ interface KeyHandlers {
   readonly historyScrollDown: () => void;
   readonly historyScrollToTop: () => void;
   readonly historyScrollToBottom: () => void;
+  // Visual mode actions
+  readonly enterVisualMode: () => void;
+  readonly exitVisualMode: () => void;
+  readonly visualCursorUp: () => void;
+  readonly visualCursorDown: () => void;
+  readonly copyVisualSelection: () => void;
 }
 
 interface KeyState {
@@ -203,33 +213,74 @@ function handleSearchModeInput(
   handleSearchTextInput(input, key, searchState, handlers);
 }
 
+function handleFullscreenScrollInput(input: string, key: KeyState, handlers: KeyHandlers): boolean {
+  if (key.upArrow || input === 'k') {
+    handlers.scrollUp();
+    return true;
+  }
+  if (key.downArrow || input === 'j') {
+    handlers.scrollDown();
+    return true;
+  }
+  if (key.leftArrow) {
+    handlers.scrollPageUp();
+    return true;
+  }
+  if (key.rightArrow) {
+    handlers.scrollPageDown();
+    return true;
+  }
+  if (input === 'g') {
+    handlers.scrollToTop();
+    return true;
+  }
+  if (input === 'G') {
+    handlers.scrollToBottom();
+    return true;
+  }
+  return false;
+}
+
 function handleFullscreenModeInput(input: string, key: KeyState, handlers: KeyHandlers): void {
   if (key.escape) {
     handlers.setMode('normal');
     return;
   }
+  if (handleFullscreenScrollInput(input, key, handlers)) {
+    return;
+  }
+  if (input === 'y') {
+    handlers.copyVisibleLogs();
+    return;
+  }
+  if (input === 'Y') {
+    handlers.copyAllLogs();
+    return;
+  }
+  if (input === 'v') {
+    handlers.enterVisualMode();
+  }
+}
+
+function handleVisualModeInput(input: string, key: KeyState, handlers: KeyHandlers): void {
+  if (key.escape) {
+    handlers.exitVisualMode();
+    return;
+  }
   if (key.upArrow || input === 'k') {
-    handlers.scrollUp();
+    handlers.visualCursorUp();
     return;
   }
   if (key.downArrow || input === 'j') {
-    handlers.scrollDown();
+    handlers.visualCursorDown();
     return;
   }
-  if (key.leftArrow) {
-    handlers.scrollPageUp();
+  if (input === 'y') {
+    handlers.copyVisualSelection();
     return;
   }
-  if (key.rightArrow) {
-    handlers.scrollPageDown();
-    return;
-  }
-  if (input === 'g') {
-    handlers.scrollToTop();
-    return;
-  }
-  if (input === 'G') {
-    handlers.scrollToBottom();
+  if (input === 'Y') {
+    handlers.copyAllLogs();
   }
 }
 
@@ -391,6 +442,16 @@ function handleServiceActions(
     handlers.openServiceHistory();
     return true;
   }
+  // y to copy visible logs
+  if (input === 'y') {
+    handlers.copyVisibleLogs();
+    return true;
+  }
+  // Y to copy all logs
+  if (input === 'Y') {
+    handlers.copyAllLogs();
+    return true;
+  }
   return false;
 }
 
@@ -540,6 +601,8 @@ interface AppState {
   scriptOutputState: ScriptOutputState | null;
   scriptHistoryState: ScriptHistoryState | null;
   scriptHistory: readonly ScriptExecution[];
+  notification: string | null;
+  visualModeState: VisualModeState | null;
 }
 
 interface AppActions {
@@ -560,6 +623,8 @@ function useAppState(store: AppStoreApi): AppState {
   const scriptOutputState = useStore(store, (s) => s.scriptOutputState);
   const scriptHistoryState = useStore(store, (s) => s.scriptHistoryState);
   const scriptHistory = useStore(store, (s) => s.scriptHistory);
+  const notification = useStore(store, (s) => s.notification);
+  const visualModeState = useStore(store, (s) => s.visualModeState);
 
   return {
     config,
@@ -572,6 +637,8 @@ function useAppState(store: AppStoreApi): AppState {
     scriptOutputState,
     scriptHistoryState,
     scriptHistory,
+    notification,
+    visualModeState,
   };
 }
 
@@ -616,6 +683,10 @@ function dispatchInput(input: string, key: KeyState, state: AppState, handlers: 
   }
   if (state.mode === 'fullscreen') {
     handleFullscreenModeInput(input, key, handlers);
+    return;
+  }
+  if (state.mode === 'visual') {
+    handleVisualModeInput(input, key, handlers);
     return;
   }
   if (state.mode === 'scriptOutput') {
@@ -774,6 +845,151 @@ function createScrollHandlers(ctx: ScrollContext): Pick<KeyHandlers, ScrollHandl
         const maxOffset = Math.max(0, focused.runtime.logs.length - 1);
         ctx.store.getState().setScrollOffset(focused.serviceId, maxOffset);
       }
+    },
+  };
+}
+
+function calculateVisibleLines(ctx: ScrollContext): number {
+  const { stdout } = process;
+  const termHeight = stdout.rows;
+  const state = ctx.store.getState();
+  const isFullscreen = state.mode === 'fullscreen';
+
+  if (isFullscreen) {
+    // Fullscreen: terminal height - 6 (header, footer, borders)
+    return Math.max(1, termHeight - 6);
+  }
+
+  // Normal mode: calculate based on panel layout
+  const serviceCount = ctx.config.services.length;
+  const columns = calculateColumns(ctx.config.global.columns, serviceCount);
+  const rows = Math.ceil(serviceCount / columns);
+  const availableHeight = termHeight - 6; // header + footer
+  const panelHeight = Math.floor(availableHeight / rows);
+  const contentHeight = panelHeight - 4; // panel border + header
+  return Math.max(1, contentHeight);
+}
+
+function createCopyHandlers(
+  ctx: ScrollContext,
+): Pick<KeyHandlers, 'copyVisibleLogs' | 'copyAllLogs'> {
+  const doCopy = (allLogs: boolean): void => {
+    const focused = getFocusedServiceFromContext(ctx);
+    if (focused === null) {
+      return;
+    }
+    const logs = focused.runtime.logs;
+    let linesToCopy: typeof logs;
+    if (allLogs) {
+      linesToCopy = logs;
+    } else {
+      const visibleLines = calculateVisibleLines(ctx);
+      // Clamp offset like LogView does (scrollOffset can be MAX_SAFE_INTEGER for auto-scroll)
+      const maxOffset = Math.max(0, logs.length - visibleLines);
+      const offset = Math.min(focused.runtime.scrollOffset, maxOffset);
+      linesToCopy = logs.slice(offset, offset + visibleLines);
+    }
+    const text = linesToCopy.map((line) => line.content).join('\n');
+    const success = copyToClipboard(text);
+    const message = success
+      ? `Copied ${String(linesToCopy.length)} lines`
+      : 'Failed to copy to clipboard';
+    ctx.store.getState().setNotification(message);
+    setTimeout(() => {
+      ctx.store.getState().setNotification(null);
+    }, 2000);
+  };
+
+  return {
+    copyVisibleLogs: (): void => {
+      doCopy(false);
+    },
+    copyAllLogs: (): void => {
+      doCopy(true);
+    },
+  };
+}
+
+type VisualModeHandlerKeys =
+  | 'enterVisualMode'
+  | 'exitVisualMode'
+  | 'visualCursorUp'
+  | 'visualCursorDown'
+  | 'copyVisualSelection';
+
+interface FocusedLogs {
+  readonly logs: readonly { content: string }[];
+  readonly logCount: number;
+}
+
+function getFocusedLogs(ctx: ScrollContext): FocusedLogs | null {
+  const focused = getFocusedServiceFromContext(ctx);
+  if (focused === null) return null;
+  return { logs: focused.runtime.logs, logCount: focused.runtime.logs.length };
+}
+
+function performVisualCopy(ctx: ScrollContext): void {
+  const state = ctx.store.getState();
+  const data = getFocusedLogs(ctx);
+  if (state.visualModeState === null || data === null) return;
+  const { cursorLine, selectionStart } = state.visualModeState;
+  const startLine = Math.min(cursorLine, selectionStart);
+  const endLine = Math.max(cursorLine, selectionStart);
+  const selectedLogs = data.logs.slice(startLine, endLine + 1);
+  const text = selectedLogs.map((line) => line.content).join('\n');
+  const success = copyToClipboard(text);
+  const message = success ? `Copied ${String(selectedLogs.length)} lines` : 'Failed to copy';
+  state.setNotification(message);
+  state.exitVisualMode();
+  setTimeout(() => {
+    ctx.store.getState().setNotification(null);
+  }, 2000);
+}
+
+function scrollToCursor(ctx: ScrollContext, cursorLine: number): void {
+  const focused = getFocusedServiceFromContext(ctx);
+  if (focused === null) return;
+  const visibleLines = calculateVisibleLines(ctx);
+  const currentOffset = Math.min(focused.runtime.scrollOffset, focused.runtime.logs.length - 1);
+  // Scroll up if cursor is above visible area
+  if (cursorLine < currentOffset) {
+    ctx.store.getState().setScrollOffset(focused.serviceId, cursorLine);
+  }
+  // Scroll down if cursor is below visible area
+  if (cursorLine >= currentOffset + visibleLines) {
+    ctx.store.getState().setScrollOffset(focused.serviceId, cursorLine - visibleLines + 1);
+  }
+}
+
+function createVisualModeHandlers(ctx: ScrollContext): Pick<KeyHandlers, VisualModeHandlerKeys> {
+  return {
+    enterVisualMode: (): void => {
+      const data = getFocusedLogs(ctx);
+      if (data === null || data.logCount === 0) return;
+      const startLine = Math.max(0, data.logCount - 1);
+      ctx.store.getState().enterVisualMode(startLine);
+      scrollToCursor(ctx, startLine);
+    },
+    exitVisualMode: (): void => {
+      ctx.store.getState().exitVisualMode();
+    },
+    visualCursorUp: (): void => {
+      const state = ctx.store.getState();
+      if (state.visualModeState === null) return;
+      const newLine = Math.max(0, state.visualModeState.cursorLine - 1);
+      state.moveVisualCursor(newLine);
+      scrollToCursor(ctx, newLine);
+    },
+    visualCursorDown: (): void => {
+      const state = ctx.store.getState();
+      const data = getFocusedLogs(ctx);
+      if (state.visualModeState === null || data === null) return;
+      const newLine = Math.min(data.logCount - 1, state.visualModeState.cursorLine + 1);
+      state.moveVisualCursor(newLine);
+      scrollToCursor(ctx, newLine);
+    },
+    copyVisualSelection: (): void => {
+      performVisualCopy(ctx);
     },
   };
 }
@@ -1019,6 +1235,8 @@ function useKeyHandlers(
 ): KeyHandlers {
   return useMemo(() => {
     const scrollHandlers = createScrollHandlers(scrollCtx);
+    const copyHandlers = createCopyHandlers(scrollCtx);
+    const visualModeHandlers = createVisualModeHandlers(scrollCtx);
     const serviceHandlers = createServiceActionHandlers(serviceCtx);
     const scriptsHandlers = createScriptsHandlers(scriptsCtx);
     return {
@@ -1029,6 +1247,8 @@ function useKeyHandlers(
       nextMatch: search.nextMatch,
       prevMatch: search.prevMatch,
       ...scrollHandlers,
+      ...copyHandlers,
+      ...visualModeHandlers,
       ...serviceHandlers,
       ...scriptsHandlers,
     };
@@ -1097,6 +1317,7 @@ function FullscreenView({
   if (focusedService === undefined) {
     return null;
   }
+  const isVisualMode = state.mode === 'visual';
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Header projectName={state.config.global.name} />
@@ -1108,6 +1329,8 @@ function FullscreenView({
         searchTerm={getSearchTerm(state.searchState)}
         searchMatches={getSearchMatches(state.searchState)}
         currentMatchIndex={getCurrentMatchIndex(state.searchState)}
+        visualModeState={state.visualModeState}
+        isVisualMode={isVisualMode}
       />
     </Box>
   );
@@ -1141,6 +1364,7 @@ function MainView({ state, serviceDisplays, serviceManager }: MainViewProps): Re
         searchTerm={getSearchTerm(state.searchState)}
         matchCount={getMatchCount(state.searchState)}
         currentMatch={getCurrentMatchIndex(state.searchState)}
+        notification={state.notification}
       />
     </Box>
   );
@@ -1202,6 +1426,7 @@ function getPanelIndexFromClick(col: number, row: number, config: MouseConfig): 
 function createMouseHandlers(
   handlersRef: React.RefObject<KeyHandlers>,
   config: MouseConfig,
+  store: AppStoreApi,
 ): MouseHandlersResult {
   return {
     onScrollUp: (): void => {
@@ -1211,6 +1436,11 @@ function createMouseHandlers(
       handlersRef.current.scrollDown();
     },
     onClick: (col: number, row: number): void => {
+      // Don't change focus in fullscreen mode
+      const currentMode = store.getState().mode;
+      if (currentMode === 'fullscreen') {
+        return;
+      }
       const panelIndex = getPanelIndexFromClick(col, row, config);
       if (panelIndex !== null) {
         handlersRef.current.setFocusedSpace(panelIndex);
@@ -1219,7 +1449,11 @@ function createMouseHandlers(
   };
 }
 
-function useMouseSupport(state: AppState, handlersRef: React.RefObject<KeyHandlers>): void {
+function useMouseSupport(
+  state: AppState,
+  handlersRef: React.RefObject<KeyHandlers>,
+  store: AppStoreApi,
+): void {
   const mouseEnabled = state.mode !== 'help' && state.mode !== 'command';
   const mouseConfig = useMemo(
     () => ({
@@ -1229,8 +1463,8 @@ function useMouseSupport(state: AppState, handlersRef: React.RefObject<KeyHandle
     [state.config.services.length, state.config.global.columns],
   );
   const mouseHandlers = useMemo(
-    () => createMouseHandlers(handlersRef, mouseConfig),
-    [handlersRef, mouseConfig],
+    () => createMouseHandlers(handlersRef, mouseConfig, store),
+    [handlersRef, mouseConfig, store],
   );
   useMouse(mouseHandlers, mouseEnabled);
 }
@@ -1378,7 +1612,7 @@ function renderModeOverlay(
       </Box>
     );
   }
-  if (state.mode === 'fullscreen') {
+  if (state.mode === 'fullscreen' || state.mode === 'visual') {
     return FullscreenView({ state, serviceDisplays });
   }
   const scriptOverlay = renderScriptOverlays(state, store);
@@ -1438,7 +1672,7 @@ function AppContent({ store, config }: AppContentProps): React.ReactElement {
     dispatchInput(input, key, stateRef.current, handlersRef.current);
   });
 
-  useMouseSupport(state, handlersRef);
+  useMouseSupport(state, handlersRef, store);
 
   const overlay = renderModeOverlay(state, store, serviceDisplays);
   if (overlay !== null) {

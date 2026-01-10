@@ -1,3 +1,4 @@
+export { copyToClipboard } from './clipboard.js';
 export { createFileLogger } from './file-logger.js';
 export { createScriptHistoryLogger, createNoOpHistoryLogger } from './script-history-logger.js';
 

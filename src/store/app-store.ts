@@ -30,9 +30,19 @@ export type AppMode =
   | 'search'
   | 'help'
   | 'fullscreen'
+  | 'visual'
   | 'scripts'
   | 'scriptOutput'
   | 'scriptHistory';
+
+/**
+ * State for visual (vim-like) selection mode.
+ * Tracks cursor position and selection range.
+ */
+export interface VisualModeState {
+  readonly cursorLine: number;
+  readonly selectionStart: number;
+}
 
 /**
  * State for the scripts menu overlay.
@@ -81,6 +91,8 @@ interface AppState {
   readonly scriptOutputState: ScriptOutputState | null;
   readonly scriptHistoryState: ScriptHistoryState | null;
   readonly scriptHistory: readonly ScriptExecution[];
+  readonly notification: string | null;
+  readonly visualModeState: VisualModeState | null;
 }
 
 interface AppActions {
@@ -111,6 +123,11 @@ interface AppActions {
   addScriptExecution: (execution: ScriptExecution) => void;
   updateScriptExecution: (id: string, updates: Partial<ScriptExecution>) => void;
   getScriptExecution: (id: string) => ScriptExecution | undefined;
+  setNotification: (message: string | null) => void;
+  // Visual mode actions
+  enterVisualMode: (startLine: number) => void;
+  exitVisualMode: () => void;
+  moveVisualCursor: (line: number) => void;
 }
 
 export type AppStore = AppState & AppActions;
@@ -402,6 +419,28 @@ function createStoreActions(set: SetState, get: GetState): AppActions {
     ...createScriptOutputActions(set),
     ...createScriptHistoryActions(set),
     ...createScriptExecutionActions(set, get),
+    setNotification: (message): void => {
+      set({ notification: message });
+    },
+    enterVisualMode: (startLine): void => {
+      set({
+        mode: 'visual',
+        visualModeState: { cursorLine: startLine, selectionStart: startLine },
+      });
+    },
+    exitVisualMode: (): void => {
+      set({ mode: 'fullscreen', visualModeState: null });
+    },
+    moveVisualCursor: (line): void => {
+      set((state) => {
+        if (state.visualModeState === null) {
+          return state;
+        }
+        return {
+          visualModeState: { ...state.visualModeState, cursorLine: line },
+        };
+      });
+    },
   };
 }
 
@@ -419,6 +458,8 @@ export function createAppStore(config: Config): AppStoreApi {
     scriptOutputState: null,
     scriptHistoryState: null,
     scriptHistory: [],
+    notification: null,
+    visualModeState: null,
     ...createStoreActions(set, get),
   }));
 }

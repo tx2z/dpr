@@ -1,5 +1,7 @@
 import { useCallback, useMemo } from 'react';
 
+import { copyToClipboard } from '../utils/index.js';
+
 import type { UseServiceManagerResult } from './use-service-manager.js';
 import type { Config } from '../config/index.js';
 import type { AppStoreApi } from '../store/index.js';
@@ -213,6 +215,82 @@ function createHistoryCommand(store: AppStoreApi): Command {
   };
 }
 
+function calculateVisibleLines(config: Config, isFullscreen: boolean): number {
+  const { stdout } = process;
+  const termHeight = stdout.rows;
+
+  if (isFullscreen) {
+    return Math.max(1, termHeight - 6);
+  }
+
+  const serviceCount = config.services.length;
+  const termWidth = stdout.columns;
+  let columns: number;
+  if (config.global.columns !== 'auto') {
+    columns = Math.min(config.global.columns, serviceCount);
+  } else if (termWidth < 80) {
+    columns = 1;
+  } else if (termWidth < 120) {
+    columns = Math.min(2, serviceCount);
+  } else {
+    columns = Math.min(3, serviceCount);
+  }
+  const rows = Math.ceil(serviceCount / columns);
+  const availableHeight = termHeight - 6;
+  const panelHeight = Math.floor(availableHeight / rows);
+  return Math.max(1, panelHeight - 4);
+}
+
+function createCopyCommand(config: Config, store: AppStoreApi): Command {
+  return {
+    name: 'copy',
+    aliases: ['y'],
+    description: 'Copy logs from focused service',
+    usage: '/copy [all]',
+    execute: (args): void => {
+      const state = store.getState();
+      const focusedIndex = state.focusedSpaceIndex;
+      if (focusedIndex === null) {
+        state.setNotification('No service focused');
+        setTimeout(() => {
+          state.setNotification(null);
+        }, 2000);
+        return;
+      }
+      const service = config.services[focusedIndex];
+      if (service === undefined) {
+        return;
+      }
+      const runtime = state.services[service.id];
+      if (runtime === undefined) {
+        return;
+      }
+      const copyAll = args[0] === 'all';
+      const logs = runtime.logs;
+      let linesToCopy: typeof logs;
+      if (copyAll) {
+        linesToCopy = logs;
+      } else {
+        const isFullscreen = state.mode === 'fullscreen';
+        const visibleLines = calculateVisibleLines(config, isFullscreen);
+        // Clamp offset (scrollOffset can be MAX_SAFE_INTEGER for auto-scroll)
+        const maxOffset = Math.max(0, logs.length - visibleLines);
+        const offset = Math.min(runtime.scrollOffset, maxOffset);
+        linesToCopy = logs.slice(offset, offset + visibleLines);
+      }
+      const text = linesToCopy.map((line) => line.content).join('\n');
+      const success = copyToClipboard(text);
+      const message = success
+        ? `Copied ${String(linesToCopy.length)} lines`
+        : 'Failed to copy to clipboard';
+      state.setNotification(message);
+      setTimeout(() => {
+        state.setNotification(null);
+      }, 2000);
+    },
+  };
+}
+
 function matchesCommand(cmd: Command, query: string): boolean {
   const lowerQuery = query.toLowerCase();
   if (cmd.name.toLowerCase().startsWith(lowerQuery)) {
@@ -267,6 +345,7 @@ function createAllCommands(
     createStopAllCommand(serviceManager),
     createClearCommand(config, store),
     createFocusCommand(config, store),
+    createCopyCommand(config, store),
     createQuitCommand(exit, serviceManager),
     createHelpCommand(store),
     createHistoryCommand(store),

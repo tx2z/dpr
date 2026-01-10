@@ -4,7 +4,7 @@ import React from 'react';
 import { LogView } from './log-view.js';
 
 import type { LogLine, ServiceConfig, ServiceState } from '../config/index.js';
-import type { SearchMatch } from '../store/index.js';
+import type { SearchMatch, VisualModeState } from '../store/index.js';
 
 export interface FullscreenOverlayProps {
   readonly config: ServiceConfig;
@@ -14,6 +14,8 @@ export interface FullscreenOverlayProps {
   readonly searchTerm: string;
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
+  readonly visualModeState: VisualModeState | null;
+  readonly isVisualMode: boolean;
 }
 
 function getStatusText(state: ServiceState): { text: string; color: string } {
@@ -35,6 +37,50 @@ function getStatusText(state: ServiceState): { text: string; color: string } {
   }
 }
 
+function getSelectionRange(
+  visualModeState: VisualModeState | null,
+): { startLine: number; endLine: number } | null {
+  if (visualModeState === null) {
+    return null;
+  }
+  const { cursorLine, selectionStart } = visualModeState;
+  return {
+    startLine: Math.min(cursorLine, selectionStart),
+    endLine: Math.max(cursorLine, selectionStart),
+  };
+}
+
+function getFooterText(isVisualMode: boolean): string {
+  if (isVisualMode) {
+    return '[↑↓/jk] move cursor · [y] copy selection · [Y] copy all · [Esc] exit visual';
+  }
+  return '[↑↓/jk] scroll · [←→] page · [g/G] top/bottom · [v] visual · [Esc] close';
+}
+
+interface HeaderProps {
+  readonly config: ServiceConfig;
+  readonly status: { text: string; color: string };
+  readonly isVisualMode: boolean;
+}
+
+function FullscreenHeader({ config, status, isVisualMode }: HeaderProps): React.ReactElement {
+  return (
+    <Box justifyContent="space-between" marginBottom={1}>
+      <Text color={config.color} bold>
+        {config.name}
+      </Text>
+      <Box>
+        {isVisualMode && (
+          <Text color="cyan" bold>
+            -- VISUAL -- {'  '}
+          </Text>
+        )}
+        <Text color={status.color}>{status.text}</Text>
+      </Box>
+    </Box>
+  );
+}
+
 export function FullscreenOverlay({
   config,
   state,
@@ -43,11 +89,15 @@ export function FullscreenOverlay({
   searchTerm,
   searchMatches,
   currentMatchIndex,
+  visualModeState,
+  isVisualMode,
 }: FullscreenOverlayProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalHeight = stdout.rows;
   const contentHeight = Math.max(1, terminalHeight - 6);
   const status = getStatusText(state);
+  const selectionRange = getSelectionRange(visualModeState);
+  const footerText = getFooterText(isVisualMode);
 
   return (
     <Box
@@ -57,12 +107,7 @@ export function FullscreenOverlay({
       paddingX={1}
       flexGrow={1}
     >
-      <Box justifyContent="space-between" marginBottom={1}>
-        <Text color={config.color} bold>
-          {config.name}
-        </Text>
-        <Text color={status.color}>{status.text}</Text>
-      </Box>
+      <FullscreenHeader config={config} status={status} isVisualMode={isVisualMode} />
       <Box flexDirection="column" flexGrow={1}>
         <LogView
           lines={logs}
@@ -72,10 +117,12 @@ export function FullscreenOverlay({
           searchMatches={searchMatches}
           currentMatchIndex={currentMatchIndex}
           serviceId={config.id}
+          selectionRange={selectionRange}
+          cursorLine={visualModeState?.cursorLine ?? null}
         />
       </Box>
       <Box marginTop={1}>
-        <Text color="gray">[↑↓/jk] scroll · [←→] page · [g/G] top/bottom · [Esc] close</Text>
+        <Text color="gray">{footerText}</Text>
       </Box>
     </Box>
   );

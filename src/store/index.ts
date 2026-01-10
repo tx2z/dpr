@@ -9,4 +9,5 @@ export type {
   ScriptsMenuState,
   ScriptOutputState,
   ScriptHistoryState,
+  VisualModeState,
 } from './app-store.js';

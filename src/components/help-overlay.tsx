@@ -19,7 +19,7 @@ export function HelpOverlay(): React.ReactElement {
         <Text bold>panel actions (when focused)</Text>
       </Box>
       <Text>[s] start · [x] stop · [K] kill · [Enter] fullscreen · [Esc] unfocus</Text>
-      <Text>[r] scripts menu · [h] script history</Text>
+      <Text>[r] scripts menu · [h] script history · [y] copy logs · [Y] copy all</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>global actions</Text>
@@ -29,8 +29,13 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginTop={1} marginBottom={1}>
         <Text bold>commands (press [/])</Text>
       </Box>
-      <Text>/start · /stop · /kill · /restart · /clear · /focus</Text>
+      <Text>/start · /stop · /kill · /restart · /clear · /focus · /copy</Text>
       <Text>/start-all · /stop-all</Text>
+
+      <Box marginTop={1} marginBottom={1}>
+        <Text bold>fullscreen mode (when in fullscreen)</Text>
+      </Box>
+      <Text>[v] visual mode (select lines) · [y/Y] copy visible/all</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>other</Text>

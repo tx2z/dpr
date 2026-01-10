@@ -10,10 +10,11 @@ export interface FooterProps {
   readonly searchTerm?: string;
   readonly matchCount?: number;
   readonly currentMatch?: number;
+  readonly notification?: string | null;
 }
 
 function getFocusedModeHint(): string {
-  return '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [↑↓] scroll · [Enter] full · [Esc] back';
+  return '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [y] copy · [↑↓] scroll · [Enter] full · [Esc] back';
 }
 
 function CommandFooter({ commandInput }: { readonly commandInput: string }): React.ReactElement {
@@ -67,14 +68,26 @@ function EmptyFooter(): React.ReactElement {
   );
 }
 
-export const Footer = React.memo(function Footer({
-  mode,
-  focusedIndex = null,
-  commandInput = '',
-  searchTerm = '',
-  matchCount = 0,
-  currentMatch = 0,
-}: FooterProps): React.ReactElement {
+function NotificationFooter({
+  notification,
+}: {
+  readonly notification: string;
+}): React.ReactElement {
+  return (
+    <Box borderStyle="round" borderColor="green" paddingX={1}>
+      <Text color="green">{notification}</Text>
+    </Box>
+  );
+}
+
+function renderModeFooter(
+  mode: AppMode,
+  commandInput: string,
+  searchTerm: string,
+  matchCount: number,
+  currentMatch: number,
+  focusedIndex: number | null,
+): React.ReactElement {
   if (mode === 'command') {
     return <CommandFooter commandInput={commandInput} />;
   }
@@ -87,4 +100,19 @@ export const Footer = React.memo(function Footer({
     return <FocusedFooter />;
   }
   return <EmptyFooter />;
+}
+
+export const Footer = React.memo(function Footer({
+  mode,
+  focusedIndex = null,
+  commandInput = '',
+  searchTerm = '',
+  matchCount = 0,
+  currentMatch = 0,
+  notification = null,
+}: FooterProps): React.ReactElement {
+  if (notification !== null) {
+    return <NotificationFooter notification={notification} />;
+  }
+  return renderModeFooter(mode, commandInput, searchTerm, matchCount, currentMatch, focusedIndex);
 });
