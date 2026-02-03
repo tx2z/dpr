@@ -16,6 +16,7 @@ export interface FullscreenOverlayProps {
   readonly currentMatchIndex: number;
   readonly visualModeState: VisualModeState | null;
   readonly isVisualMode: boolean;
+  readonly fullscreenCursor: number | null;
 }
 
 function getStatusText(state: ServiceState): { text: string; color: string } {
@@ -54,7 +55,7 @@ function getFooterText(isVisualMode: boolean): string {
   if (isVisualMode) {
     return '[↑↓/jk] move cursor · [y] copy selection · [Y] copy all · [Esc] exit visual';
   }
-  return '[↑↓/jk] scroll · [←→] page · [g/G] top/bottom · [v] visual · [Esc] close';
+  return '[↑↓/jk] move cursor · [←→] page · [g/G] top/bottom · [v] visual · [Esc] close';
 }
 
 interface HeaderProps {
@@ -91,6 +92,7 @@ export function FullscreenOverlay({
   currentMatchIndex,
   visualModeState,
   isVisualMode,
+  fullscreenCursor,
 }: FullscreenOverlayProps): React.ReactElement {
   const { stdout } = useStdout();
   const terminalHeight = stdout.rows;
@@ -98,6 +100,8 @@ export function FullscreenOverlay({
   const status = getStatusText(state);
   const selectionRange = getSelectionRange(visualModeState);
   const footerText = getFooterText(isVisualMode);
+  // In visual mode, use visual cursor; otherwise use fullscreen cursor
+  const cursorLine = isVisualMode ? visualModeState?.cursorLine ?? null : fullscreenCursor;
 
   return (
     <Box
@@ -118,7 +122,7 @@ export function FullscreenOverlay({
           currentMatchIndex={currentMatchIndex}
           serviceId={config.id}
           selectionRange={selectionRange}
-          cursorLine={visualModeState?.cursorLine ?? null}
+          cursorLine={cursorLine}
         />
       </Box>
       <Box marginTop={1}>

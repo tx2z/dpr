@@ -11,6 +11,7 @@ export interface ServiceDisplay {
   readonly state: ServiceState;
   readonly logs: readonly LogLine[];
   readonly scrollOffset: number;
+  readonly fullscreenCursor: number | null;
 }
 
 export interface LayoutProps {

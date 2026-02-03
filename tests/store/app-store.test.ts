@@ -26,6 +26,9 @@ const createTestConfig = (): Config => ({
       dependsOn: [],
       readyPattern: null,
       readyDelay: 500,
+      scripts: [],
+      runOnce: false,
+      keepRunning: false,
     },
     {
       id: 'web',
@@ -40,6 +43,9 @@ const createTestConfig = (): Config => ({
       dependsOn: ['api'],
       readyPattern: null,
       readyDelay: 500,
+      scripts: [],
+      runOnce: false,
+      keepRunning: false,
     },
   ],
 });
@@ -250,6 +256,125 @@ describe('store actions', () => {
     it('should return undefined for unknown service', () => {
       const runtime = store.getState().getServiceRuntime('nonexistent');
       expect(runtime).toBeUndefined();
+    });
+  });
+
+  describe('visual mode actions', () => {
+    describe('enterVisualMode', () => {
+      it('should set mode to visual', () => {
+        store.getState().enterVisualMode(5);
+        expect(store.getState().mode).toBe('visual');
+      });
+
+      it('should initialize visualModeState', () => {
+        store.getState().enterVisualMode(5);
+        expect(store.getState().visualModeState).toEqual({
+          cursorLine: 5,
+          selectionStart: 5,
+        });
+      });
+    });
+
+    describe('exitVisualMode', () => {
+      it('should set mode to fullscreen', () => {
+        store.getState().enterVisualMode(5);
+        store.getState().exitVisualMode();
+        expect(store.getState().mode).toBe('fullscreen');
+      });
+
+      it('should clear visualModeState', () => {
+        store.getState().enterVisualMode(5);
+        store.getState().exitVisualMode();
+        expect(store.getState().visualModeState).toBeNull();
+      });
+    });
+
+    describe('moveVisualCursor', () => {
+      it('should update cursor line', () => {
+        store.getState().enterVisualMode(5);
+        store.getState().moveVisualCursor(10);
+        expect(store.getState().visualModeState?.cursorLine).toBe(10);
+      });
+
+      it('should preserve selection start', () => {
+        store.getState().enterVisualMode(5);
+        store.getState().moveVisualCursor(10);
+        expect(store.getState().visualModeState?.selectionStart).toBe(5);
+      });
+
+      it('should do nothing when not in visual mode', () => {
+        store.getState().moveVisualCursor(10);
+        expect(store.getState().visualModeState).toBeNull();
+      });
+    });
+  });
+
+  describe('notification actions', () => {
+    describe('setNotification', () => {
+      it('should set notification message', () => {
+        store.getState().setNotification('Copied 5 lines');
+        expect(store.getState().notification).toBe('Copied 5 lines');
+      });
+
+      it('should clear notification with null', () => {
+        store.getState().setNotification('test');
+        store.getState().setNotification(null);
+        expect(store.getState().notification).toBeNull();
+      });
+    });
+  });
+
+  describe('fullscreen cursor actions', () => {
+    describe('setFullscreenCursor', () => {
+      it('should set fullscreen cursor for a service', () => {
+        store.getState().setFullscreenCursor('api', 5);
+        expect(store.getState().services['api']?.fullscreenCursor).toBe(5);
+      });
+
+      it('should update fullscreen cursor to a different value', () => {
+        store.getState().setFullscreenCursor('api', 5);
+        store.getState().setFullscreenCursor('api', 10);
+        expect(store.getState().services['api']?.fullscreenCursor).toBe(10);
+      });
+
+      it('should clear fullscreen cursor with null', () => {
+        store.getState().setFullscreenCursor('api', 5);
+        store.getState().setFullscreenCursor('api', null);
+        expect(store.getState().services['api']?.fullscreenCursor).toBeNull();
+      });
+
+      it('should not affect other services', () => {
+        store.getState().setFullscreenCursor('api', 5);
+        expect(store.getState().services['web']?.fullscreenCursor).toBeNull();
+      });
+
+      it('should ignore unknown service IDs', () => {
+        const stateBefore = store.getState().services;
+        store.getState().setFullscreenCursor('nonexistent', 5);
+        expect(store.getState().services).toEqual(stateBefore);
+      });
+
+      it('should preserve other service state when setting cursor', () => {
+        // Set some logs first
+        store
+          .getState()
+          .appendLog('api', { timestamp: new Date(), content: 'test', stream: 'stdout' });
+        store.getState().setScrollOffset('api', 10);
+
+        store.getState().setFullscreenCursor('api', 5);
+
+        const runtime = store.getState().services['api'];
+        expect(runtime?.fullscreenCursor).toBe(5);
+        expect(runtime?.logs).toHaveLength(1);
+        expect(runtime?.scrollOffset).toBe(10);
+      });
+    });
+  });
+
+  describe('initial service state', () => {
+    it('should initialize fullscreenCursor as null', () => {
+      expect(store.getState().services['api']?.fullscreenCursor).toBeNull();
+      expect(store.getState().services['web']?.fullscreenCursor).toBeNull();
     });
   });
 });

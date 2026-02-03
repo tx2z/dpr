@@ -87,6 +87,14 @@ interface KeyHandlers {
   readonly visualCursorUp: () => void;
   readonly visualCursorDown: () => void;
   readonly copyVisualSelection: () => void;
+  // Fullscreen cursor handlers
+  readonly initFullscreenCursor: () => void;
+  readonly fullscreenCursorUp: () => void;
+  readonly fullscreenCursorDown: () => void;
+  readonly fullscreenCursorPageUp: () => void;
+  readonly fullscreenCursorPageDown: () => void;
+  readonly fullscreenCursorToTop: () => void;
+  readonly fullscreenCursorToBottom: () => void;
 }
 
 interface KeyState {
@@ -213,29 +221,29 @@ function handleSearchModeInput(
   handleSearchTextInput(input, key, searchState, handlers);
 }
 
-function handleFullscreenScrollInput(input: string, key: KeyState, handlers: KeyHandlers): boolean {
+function handleFullscreenCursorInput(input: string, key: KeyState, handlers: KeyHandlers): boolean {
   if (key.upArrow || input === 'k') {
-    handlers.scrollUp();
+    handlers.fullscreenCursorUp();
     return true;
   }
   if (key.downArrow || input === 'j') {
-    handlers.scrollDown();
+    handlers.fullscreenCursorDown();
     return true;
   }
   if (key.leftArrow) {
-    handlers.scrollPageUp();
+    handlers.fullscreenCursorPageUp();
     return true;
   }
   if (key.rightArrow) {
-    handlers.scrollPageDown();
+    handlers.fullscreenCursorPageDown();
     return true;
   }
   if (input === 'g') {
-    handlers.scrollToTop();
+    handlers.fullscreenCursorToTop();
     return true;
   }
   if (input === 'G') {
-    handlers.scrollToBottom();
+    handlers.fullscreenCursorToBottom();
     return true;
   }
   return false;
@@ -246,7 +254,7 @@ function handleFullscreenModeInput(input: string, key: KeyState, handlers: KeyHa
     handlers.setMode('normal');
     return;
   }
-  if (handleFullscreenScrollInput(input, key, handlers)) {
+  if (handleFullscreenCursorInput(input, key, handlers)) {
     return;
   }
   if (input === 'y') {
@@ -510,6 +518,7 @@ function handleEnterFullscreen(
   // Enter opens fullscreen when a panel is focused
   if (key.return && focusedSpaceIndex !== null) {
     handlers.setMode('fullscreen');
+    handlers.initFullscreenCursor();
     return true;
   }
   return false;
@@ -580,6 +589,7 @@ function buildServiceDisplay(
     state: runtime?.state ?? DEFAULT_SERVICE_STATE,
     logs: runtime?.logs ?? [],
     scrollOffset: runtime?.scrollOffset ?? 0,
+    fullscreenCursor: runtime?.fullscreenCursor ?? null,
   };
 }
 
@@ -917,6 +927,15 @@ type VisualModeHandlerKeys =
   | 'visualCursorDown'
   | 'copyVisualSelection';
 
+type FullscreenCursorHandlerKeys =
+  | 'initFullscreenCursor'
+  | 'fullscreenCursorUp'
+  | 'fullscreenCursorDown'
+  | 'fullscreenCursorPageUp'
+  | 'fullscreenCursorPageDown'
+  | 'fullscreenCursorToTop'
+  | 'fullscreenCursorToBottom';
+
 interface FocusedLogs {
   readonly logs: readonly { content: string }[];
   readonly logCount: number;
@@ -964,9 +983,11 @@ function scrollToCursor(ctx: ScrollContext, cursorLine: number): void {
 function createVisualModeHandlers(ctx: ScrollContext): Pick<KeyHandlers, VisualModeHandlerKeys> {
   return {
     enterVisualMode: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
       const data = getFocusedLogs(ctx);
-      if (data === null || data.logCount === 0) return;
-      const startLine = Math.max(0, data.logCount - 1);
+      if (focused === null || data === null || data.logCount === 0) return;
+      // Use fullscreen cursor if available, otherwise start at last line
+      const startLine = focused.runtime.fullscreenCursor ?? Math.max(0, data.logCount - 1);
       ctx.store.getState().enterVisualMode(startLine);
       scrollToCursor(ctx, startLine);
     },
@@ -990,6 +1011,66 @@ function createVisualModeHandlers(ctx: ScrollContext): Pick<KeyHandlers, VisualM
     },
     copyVisualSelection: (): void => {
       performVisualCopy(ctx);
+    },
+  };
+}
+
+function moveFullscreenCursor(ctx: ScrollContext, newLine: number): void {
+  const focused = getFocusedServiceFromContext(ctx);
+  if (focused === null) return;
+  const maxLine = Math.max(0, focused.runtime.logs.length - 1);
+  const clampedLine = Math.max(0, Math.min(maxLine, newLine));
+  ctx.store.getState().setFullscreenCursor(focused.serviceId, clampedLine);
+  scrollToCursor(ctx, clampedLine);
+}
+
+function createFullscreenCursorHandlers(
+  ctx: ScrollContext,
+): Pick<KeyHandlers, FullscreenCursorHandlerKeys> {
+  return {
+    initFullscreenCursor: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      // Only init if cursor is null (entering fullscreen for first time or after clear)
+      if (focused.runtime.fullscreenCursor !== null) return;
+      const visibleLines = calculateVisibleLines(ctx);
+      const logCount = focused.runtime.logs.length;
+      // Position cursor at bottom of visible area (like Vim)
+      const initialCursor = Math.max(0, Math.min(logCount - 1, visibleLines - 1));
+      ctx.store.getState().setFullscreenCursor(focused.serviceId, initialCursor);
+    },
+    fullscreenCursorUp: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      const current = focused.runtime.fullscreenCursor ?? 0;
+      moveFullscreenCursor(ctx, current - 1);
+    },
+    fullscreenCursorDown: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      const current = focused.runtime.fullscreenCursor ?? 0;
+      moveFullscreenCursor(ctx, current + 1);
+    },
+    fullscreenCursorPageUp: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      const current = focused.runtime.fullscreenCursor ?? 0;
+      moveFullscreenCursor(ctx, current - PAGE_SIZE);
+    },
+    fullscreenCursorPageDown: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      const current = focused.runtime.fullscreenCursor ?? 0;
+      moveFullscreenCursor(ctx, current + PAGE_SIZE);
+    },
+    fullscreenCursorToTop: (): void => {
+      moveFullscreenCursor(ctx, 0);
+    },
+    fullscreenCursorToBottom: (): void => {
+      const focused = getFocusedServiceFromContext(ctx);
+      if (focused === null) return;
+      const maxLine = Math.max(0, focused.runtime.logs.length - 1);
+      moveFullscreenCursor(ctx, maxLine);
     },
   };
 }
@@ -1237,6 +1318,7 @@ function useKeyHandlers(
     const scrollHandlers = createScrollHandlers(scrollCtx);
     const copyHandlers = createCopyHandlers(scrollCtx);
     const visualModeHandlers = createVisualModeHandlers(scrollCtx);
+    const fullscreenCursorHandlers = createFullscreenCursorHandlers(scrollCtx);
     const serviceHandlers = createServiceActionHandlers(serviceCtx);
     const scriptsHandlers = createScriptsHandlers(scriptsCtx);
     return {
@@ -1249,6 +1331,7 @@ function useKeyHandlers(
       ...scrollHandlers,
       ...copyHandlers,
       ...visualModeHandlers,
+      ...fullscreenCursorHandlers,
       ...serviceHandlers,
       ...scriptsHandlers,
     };
@@ -1331,6 +1414,7 @@ function FullscreenView({
         currentMatchIndex={getCurrentMatchIndex(state.searchState)}
         visualModeState={state.visualModeState}
         isVisualMode={isVisualMode}
+        fullscreenCursor={focusedService.fullscreenCursor}
       />
     </Box>
   );

@@ -78,6 +78,7 @@ export interface ServiceRuntime {
   readonly state: ServiceState;
   readonly logs: readonly LogLine[];
   readonly scrollOffset: number;
+  readonly fullscreenCursor: number | null;
 }
 
 interface AppState {
@@ -128,6 +129,8 @@ interface AppActions {
   enterVisualMode: (startLine: number) => void;
   exitVisualMode: () => void;
   moveVisualCursor: (line: number) => void;
+  // Fullscreen cursor
+  setFullscreenCursor: (serviceId: string, line: number | null) => void;
 }
 
 export type AppStore = AppState & AppActions;
@@ -146,6 +149,7 @@ function createInitialServiceRuntime(): ServiceRuntime {
     },
     logs: [],
     scrollOffset: 0,
+    fullscreenCursor: null,
   };
 }
 
@@ -383,6 +387,46 @@ function createScriptExecutionActions(
   };
 }
 
+function createVisualModeActions(
+  set: SetState,
+): Pick<AppActions, 'enterVisualMode' | 'exitVisualMode' | 'moveVisualCursor' | 'setFullscreenCursor'> {
+  return {
+    enterVisualMode: (startLine): void => {
+      set({
+        mode: 'visual',
+        visualModeState: { cursorLine: startLine, selectionStart: startLine },
+      });
+    },
+    exitVisualMode: (): void => {
+      set({ mode: 'fullscreen', visualModeState: null });
+    },
+    moveVisualCursor: (line): void => {
+      set((state) => {
+        if (state.visualModeState === null) {
+          return state;
+        }
+        return {
+          visualModeState: { ...state.visualModeState, cursorLine: line },
+        };
+      });
+    },
+    setFullscreenCursor: (serviceId, line): void => {
+      set((state) => {
+        const existing = state.services[serviceId];
+        if (existing === undefined) {
+          return state;
+        }
+        return {
+          services: {
+            ...state.services,
+            [serviceId]: { ...existing, fullscreenCursor: line },
+          },
+        };
+      });
+    },
+  };
+}
+
 function createStoreActions(set: SetState, get: GetState): AppActions {
   const updateServiceState = createUpdateServiceState(set);
 
@@ -422,25 +466,7 @@ function createStoreActions(set: SetState, get: GetState): AppActions {
     setNotification: (message): void => {
       set({ notification: message });
     },
-    enterVisualMode: (startLine): void => {
-      set({
-        mode: 'visual',
-        visualModeState: { cursorLine: startLine, selectionStart: startLine },
-      });
-    },
-    exitVisualMode: (): void => {
-      set({ mode: 'fullscreen', visualModeState: null });
-    },
-    moveVisualCursor: (line): void => {
-      set((state) => {
-        if (state.visualModeState === null) {
-          return state;
-        }
-        return {
-          visualModeState: { ...state.visualModeState, cursorLine: line },
-        };
-      });
-    },
+    ...createVisualModeActions(set),
   };
 }
 
