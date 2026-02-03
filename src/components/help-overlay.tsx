@@ -29,13 +29,13 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginTop={1} marginBottom={1}>
         <Text bold>commands (press [/])</Text>
       </Box>
-      <Text>/start · /stop · /kill · /restart · /clear · /focus · /copy</Text>
-      <Text>/start-all · /stop-all</Text>
+      <Text>/start · /stop · /kill · /restart · /clear · /focus · /copy · /quit</Text>
+      <Text>/start-all · /stop-all · /help · /history</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>fullscreen mode (when in fullscreen)</Text>
       </Box>
-      <Text>[↑↓/jk] cursor · [←→] page · [v] visual mode · [y/Y] copy visible/all</Text>
+      <Text>[↑↓/jk] cursor · [←→] page · [g/G] top/bottom · [v] visual · [y/Y] copy visible/all</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>other</Text>

@@ -14,7 +14,7 @@ export interface FooterProps {
 }
 
 function getFocusedModeHint(): string {
-  return '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [y] copy · [↑↓] scroll · [Enter] full · [Esc] back';
+  return '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [y/Y] copy · [↑↓] scroll · [Enter] full · [Esc] back';
 }
 
 function CommandFooter({ commandInput }: { readonly commandInput: string }): React.ReactElement {
