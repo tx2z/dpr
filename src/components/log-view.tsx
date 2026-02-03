@@ -156,7 +156,8 @@ const LogLineComponent = React.memo(function LogLineComponent({
     return (
       <Box key={lineIndex} overflowX="hidden">
         <Text backgroundColor={bgColor} color={textColor ?? 'white'} wrap="truncate">
-          {isCursor ? '> ' : '  '}{content}
+          {isCursor ? '> ' : '  '}
+          {content}
         </Text>
       </Box>
     );
@@ -164,7 +165,9 @@ const LogLineComponent = React.memo(function LogLineComponent({
   if (line.stream === 'stderr') {
     return (
       <Box key={lineIndex} overflowX="hidden">
-        <Text color="red" wrap="truncate">{content}</Text>
+        <Text color="red" wrap="truncate">
+          {content}
+        </Text>
       </Box>
     );
   }

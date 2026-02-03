@@ -389,7 +389,10 @@ function createScriptExecutionActions(
 
 function createVisualModeActions(
   set: SetState,
-): Pick<AppActions, 'enterVisualMode' | 'exitVisualMode' | 'moveVisualCursor' | 'setFullscreenCursor'> {
+): Pick<
+  AppActions,
+  'enterVisualMode' | 'exitVisualMode' | 'moveVisualCursor' | 'setFullscreenCursor'
+> {
   return {
     enterVisualMode: (startLine): void => {
       set({

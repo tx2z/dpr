@@ -101,7 +101,7 @@ export function FullscreenOverlay({
   const selectionRange = getSelectionRange(visualModeState);
   const footerText = getFooterText(isVisualMode);
   // In visual mode, use visual cursor; otherwise use fullscreen cursor
-  const cursorLine = isVisualMode ? visualModeState?.cursorLine ?? null : fullscreenCursor;
+  const cursorLine = isVisualMode ? (visualModeState?.cursorLine ?? null) : fullscreenCursor;
 
   return (
     <Box

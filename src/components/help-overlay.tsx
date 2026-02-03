@@ -35,7 +35,9 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginTop={1} marginBottom={1}>
         <Text bold>fullscreen mode (when in fullscreen)</Text>
       </Box>
-      <Text>[↑↓/jk] cursor · [←→] page · [g/G] top/bottom · [v] visual · [y/Y] copy visible/all</Text>
+      <Text>
+        [↑↓/jk] cursor · [←→] page · [g/G] top/bottom · [v] visual · [y/Y] copy visible/all
+      </Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>other</Text>

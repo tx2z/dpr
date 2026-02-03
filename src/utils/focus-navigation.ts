@@ -4,10 +4,7 @@
  * @param serviceCount - Total number of services/panels
  * @returns The next index to focus
  */
-export function calculateNextFocusIndex(
-  currentIndex: number | null,
-  serviceCount: number,
-): number {
+export function calculateNextFocusIndex(currentIndex: number | null, serviceCount: number): number {
   const current = currentIndex ?? -1;
   return (current + 1) % serviceCount;
 }
@@ -18,10 +15,7 @@ export function calculateNextFocusIndex(
  * @param serviceCount - Total number of services/panels
  * @returns The previous index to focus
  */
-export function calculatePrevFocusIndex(
-  currentIndex: number | null,
-  serviceCount: number,
-): number {
+export function calculatePrevFocusIndex(currentIndex: number | null, serviceCount: number): number {
   if (currentIndex === null || currentIndex === 0) {
     return serviceCount - 1;
   }
