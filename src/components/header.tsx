@@ -18,7 +18,7 @@ export const Header = React.memo(function Header({ projectName }: HeaderProps): 
         {projectName ?? 'dpr'}
       </Text>
       <Text color="gray">
-        [/] cmd · [?] help · [f] find · [Tab] focus · [S] start all · [X] stop all · [q] quit
+        [/] cmd · [?] help · [f] find · [←→/Tab] focus · [S] start all · [X] stop all · [q] quit
       </Text>
     </Box>
   );

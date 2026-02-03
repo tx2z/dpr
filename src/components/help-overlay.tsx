@@ -13,7 +13,7 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginBottom={1}>
         <Text bold>navigation</Text>
       </Box>
-      <Text>[Tab/1-9] focus panel · [↑↓/jk] scroll · [←→] page · [g/G] top/bottom</Text>
+      <Text>[←→/Tab/1-9] focus panel · [↑↓/jk] scroll · [g/G] top/bottom</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>panel actions (when focused)</Text>
@@ -35,7 +35,7 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginTop={1} marginBottom={1}>
         <Text bold>fullscreen mode (when in fullscreen)</Text>
       </Box>
-      <Text>[v] visual mode (select lines) · [y/Y] copy visible/all</Text>
+      <Text>[↑↓/jk] cursor · [←→] page · [v] visual mode · [y/Y] copy visible/all</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>other</Text>

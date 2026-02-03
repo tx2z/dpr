@@ -16,7 +16,12 @@ import {
 } from './components/index.js';
 import { useCommands, useMouse, useSearch, useServiceManager } from './hooks/index.js';
 import { createAppStore } from './store/index.js';
-import { copyToClipboard } from './utils/index.js';
+import {
+  calculateNextFocusIndex,
+  calculatePrevFocusIndex,
+  copyToClipboard,
+  parseNumberKeyFocus,
+} from './utils/index.js';
 
 import type { ServiceDisplay } from './components/index.js';
 import type { Config, ScriptExecution, ServiceState } from './config/index.js';
@@ -373,11 +378,10 @@ function handleTabNavigation(
   serviceCount: number,
   focusedSpaceIndex: number | null,
 ): number {
-  const current = focusedSpaceIndex ?? -1;
   if (key.shift) {
-    return (current - 1 + serviceCount) % serviceCount;
+    return calculatePrevFocusIndex(focusedSpaceIndex, serviceCount);
   }
-  return (current + 1) % serviceCount;
+  return calculateNextFocusIndex(focusedSpaceIndex, serviceCount);
 }
 
 function handleScrollInput(
@@ -395,14 +399,6 @@ function handleScrollInput(
   }
   if (key.downArrow || input === 'j') {
     handlers.scrollDown();
-    return true;
-  }
-  if (key.leftArrow) {
-    handlers.scrollPageUp();
-    return true;
-  }
-  if (key.rightArrow) {
-    handlers.scrollPageDown();
     return true;
   }
   if (input === 'g') {
@@ -531,13 +527,17 @@ function handleFocusNavigation(
   focusedSpaceIndex: number | null,
   handlers: KeyHandlers,
 ): boolean {
-  const num = Number.parseInt(input, 10);
-  if (num >= 1 && num <= serviceCount) {
-    handlers.setFocusedSpace(num - 1);
+  const numberIndex = parseNumberKeyFocus(input, serviceCount);
+  if (numberIndex !== null) {
+    handlers.setFocusedSpace(numberIndex);
     return true;
   }
-  if (key.tab) {
+  if (key.tab || key.rightArrow) {
     handlers.setFocusedSpace(handleTabNavigation(key, serviceCount, focusedSpaceIndex));
+    return true;
+  }
+  if (key.leftArrow) {
+    handlers.setFocusedSpace(calculatePrevFocusIndex(focusedSpaceIndex, serviceCount));
     return true;
   }
   return false;

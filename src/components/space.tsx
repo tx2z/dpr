@@ -101,7 +101,7 @@ function getStoppedHint(focused: boolean, action: string): React.ReactElement {
       </Text>
     );
   }
-  return <Text color="gray">Focus with Tab or number</Text>;
+  return <Text color="gray">Focus with ←→ or number</Text>;
 }
 
 function StoppedContent({
