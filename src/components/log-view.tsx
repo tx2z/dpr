@@ -17,8 +17,8 @@ export interface LogViewProps {
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
   readonly serviceId: string;
-  readonly selectionRange?: SelectionRange | null;
   readonly cursorLine?: number | null;
+  readonly selectedRange?: SelectionRange | null;
 }
 
 interface HighlightProps {
@@ -105,7 +105,7 @@ function HighlightedText({
 }
 
 // Strip control characters that can break terminal rendering
-function sanitizeLogContent(content: string): string {
+export function sanitizeLogContent(content: string): string {
   // Remove carriage returns and other control chars except newline
   // eslint-disable-next-line no-control-regex
   return content.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
@@ -118,14 +118,8 @@ interface LogLineComponentProps {
   readonly searchMatches: readonly SearchMatch[];
   readonly currentMatchIndex: number;
   readonly serviceId: string;
-  readonly isSelected: boolean;
   readonly isCursor: boolean;
-}
-
-function getSelectionBgColor(isCursor: boolean, isSelected: boolean): string | undefined {
-  if (isCursor) return 'cyan';
-  if (isSelected) return 'blue';
-  return undefined;
+  readonly isSelected: boolean;
 }
 
 const LogLineComponent = React.memo(function LogLineComponent({
@@ -135,8 +129,8 @@ const LogLineComponent = React.memo(function LogLineComponent({
   searchMatches,
   currentMatchIndex,
   serviceId,
-  isSelected,
   isCursor,
+  isSelected,
 }: LogLineComponentProps): React.ReactElement {
   const sanitizedContent = sanitizeLogContent(line.content);
   const content = (
@@ -149,13 +143,12 @@ const LogLineComponent = React.memo(function LogLineComponent({
       serviceId={serviceId}
     />
   );
-  const bgColor = getSelectionBgColor(isCursor, isSelected);
   const textColor = line.stream === 'stderr' ? 'red' : undefined;
 
-  if (bgColor !== undefined) {
+  if (isCursor || isSelected) {
     return (
       <Box key={lineIndex} overflowX="hidden">
-        <Text backgroundColor={bgColor} color={textColor ?? 'white'} wrap="truncate">
+        <Text backgroundColor={isCursor ? 'cyan' : 'blue'} color={textColor ?? 'white'} wrap="truncate">
           {isCursor ? '> ' : '  '}
           {content}
         </Text>
@@ -178,14 +171,11 @@ const LogLineComponent = React.memo(function LogLineComponent({
   );
 });
 
-function isLineSelected(
-  lineIndex: number,
-  selectionRange: SelectionRange | null | undefined,
-): boolean {
-  if (selectionRange === null || selectionRange === undefined) {
+function isLineSelected(lineIndex: number, range: SelectionRange | null | undefined): boolean {
+  if (range === null || range === undefined) {
     return false;
   }
-  return lineIndex >= selectionRange.startLine && lineIndex <= selectionRange.endLine;
+  return lineIndex >= range.startLine && lineIndex <= range.endLine;
 }
 
 export function LogView({
@@ -196,8 +186,8 @@ export function LogView({
   searchMatches,
   currentMatchIndex,
   serviceId,
-  selectionRange,
   cursorLine,
+  selectedRange,
 }: LogViewProps): React.ReactElement {
   // Clamp scrollOffset to valid range (0 to max that shows last line)
   const maxOffset = Math.max(0, lines.length - height);
@@ -218,8 +208,8 @@ export function LogView({
             searchMatches={searchMatches}
             currentMatchIndex={currentMatchIndex}
             serviceId={serviceId}
-            isSelected={isLineSelected(lineIndex, selectionRange)}
             isCursor={cursorLine === lineIndex}
+            isSelected={isLineSelected(lineIndex, selectedRange)}
           />
         );
       })}

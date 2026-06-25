@@ -35,3 +35,20 @@ export function parseNumberKeyFocus(input: string, serviceCount: number): number
   }
   return null;
 }
+
+/**
+ * Compute the first visible row of a scrollable list so the selected row stays
+ * visible, keeping the selection roughly centered when possible.
+ * @param selectedIndex - The currently selected row index
+ * @param total - Total number of rows in the list
+ * @param visibleRows - How many rows fit on screen
+ * @returns The offset of the first visible row (0-based)
+ */
+export function clampListScroll(selectedIndex: number, total: number, visibleRows: number): number {
+  if (visibleRows <= 0 || total <= visibleRows) {
+    return 0;
+  }
+  const maxOffset = total - visibleRows;
+  const centered = selectedIndex - Math.floor(visibleRows / 2);
+  return Math.max(0, Math.min(centered, maxOffset));
+}

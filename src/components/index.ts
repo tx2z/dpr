@@ -16,6 +16,18 @@ export type { FooterProps } from './footer.js';
 export { Layout } from './layout.js';
 export type { LayoutProps, ServiceDisplay } from './layout.js';
 
+export { Sidebar } from './sidebar.js';
+export type { SidebarProps } from './sidebar.js';
+
+export { WindowPane } from './window-pane.js';
+export type { WindowPaneProps } from './window-pane.js';
+
+export { MainArea, computeWindowRows } from './main-area.js';
+export type { MainAreaProps } from './main-area.js';
+
+export { StreamView } from './stream-view.js';
+export type { StreamViewProps } from './stream-view.js';
+
 export { CommandPalette } from './command-palette.js';
 export type { CommandPaletteProps, CommandSuggestion } from './command-palette.js';
 

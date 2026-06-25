@@ -1,5 +1,7 @@
 import { createStore } from 'zustand';
 
+import { SIDEBAR_AUTO_THRESHOLD } from '../config/index.js';
+
 import type {
   Config,
   LogLine,
@@ -30,19 +32,10 @@ export type AppMode =
   | 'search'
   | 'help'
   | 'fullscreen'
-  | 'visual'
+  | 'stream'
   | 'scripts'
   | 'scriptOutput'
   | 'scriptHistory';
-
-/**
- * State for visual (vim-like) selection mode.
- * Tracks cursor position and selection range.
- */
-export interface VisualModeState {
-  readonly cursorLine: number;
-  readonly selectionStart: number;
-}
 
 /**
  * State for the scripts menu overlay.
@@ -79,6 +72,37 @@ export interface ServiceRuntime {
   readonly logs: readonly LogLine[];
   readonly scrollOffset: number;
   readonly fullscreenCursor: number | null;
+  // Monotonic count of lines ever appended (never decremented by buffer
+  // trimming). Lets the stream view detect new lines even after the 1000-line
+  // buffer starts dropping old ones.
+  readonly appendSeq: number;
+}
+
+/**
+ * Top-level layout: the column grid or the sidebar + windows view.
+ */
+export type ViewMode = 'grid' | 'sidebar';
+
+/**
+ * State for the sidebar view.
+ * Tracks the highlighted service, the open windows, and which window has focus.
+ */
+export interface SidebarState {
+  readonly selectedIndex: number;
+  readonly openWindowIds: readonly string[];
+  readonly focusedWindowIndex: number;
+}
+
+export const MAX_WINDOWS = 4;
+
+/**
+ * Active in-app mouse selection inside a log window.
+ * Lines are selected by index; the range is [min, max] of anchor and head.
+ */
+export interface SelectionState {
+  readonly serviceId: string;
+  readonly anchorLine: number;
+  readonly headLine: number;
 }
 
 interface AppState {
@@ -93,7 +117,9 @@ interface AppState {
   readonly scriptHistoryState: ScriptHistoryState | null;
   readonly scriptHistory: readonly ScriptExecution[];
   readonly notification: string | null;
-  readonly visualModeState: VisualModeState | null;
+  readonly viewMode: ViewMode;
+  readonly sidebarState: SidebarState;
+  readonly selection: SelectionState | null;
 }
 
 interface AppActions {
@@ -125,12 +151,19 @@ interface AppActions {
   updateScriptExecution: (id: string, updates: Partial<ScriptExecution>) => void;
   getScriptExecution: (id: string) => ScriptExecution | undefined;
   setNotification: (message: string | null) => void;
-  // Visual mode actions
-  enterVisualMode: (startLine: number) => void;
-  exitVisualMode: () => void;
-  moveVisualCursor: (line: number) => void;
   // Fullscreen cursor
   setFullscreenCursor: (serviceId: string, line: number | null) => void;
+  // Sidebar view actions
+  setViewMode: (mode: ViewMode) => void;
+  setSidebarSelection: (index: number) => void;
+  toggleSidebarWindow: (serviceId: string) => void;
+  openSidebarWindow: (serviceId: string) => void;
+  setFocusedWindow: (index: number) => void;
+  closeFocusedWindow: () => void;
+  // In-app mouse selection
+  startSelection: (serviceId: string, line: number) => void;
+  updateSelectionHead: (line: number) => void;
+  clearSelection: () => void;
 }
 
 export type AppStore = AppState & AppActions;
@@ -148,8 +181,10 @@ function createInitialServiceRuntime(): ServiceRuntime {
       waitingFor: [],
     },
     logs: [],
-    scrollOffset: 0,
+    // MAX_SAFE_INTEGER is the "follow the tail" sentinel; LogView clamps it.
+    scrollOffset: Number.MAX_SAFE_INTEGER,
     fullscreenCursor: null,
+    appendSeq: 0,
   };
 }
 
@@ -193,15 +228,18 @@ function createAppendLog(set: SetState) {
       const newLogs = [...existing.logs, line];
       const trimmedLogs =
         newLogs.length > LOG_BUFFER_SIZE ? newLogs.slice(-LOG_BUFFER_SIZE) : newLogs;
-      // Auto-scroll to bottom by setting scrollOffset to a large value
-      // LogView will clamp this to the valid range
+      // Follow the tail only when already at the bottom (scrollOffset is the
+      // MAX_SAFE_INTEGER sentinel). When the user has scrolled up to read or
+      // select older lines, keep their offset so the view does not jump.
+      const following = existing.scrollOffset === Number.MAX_SAFE_INTEGER;
       return {
         services: {
           ...state.services,
           [serviceId]: {
             ...existing,
             logs: trimmedLogs,
-            scrollOffset: Number.MAX_SAFE_INTEGER,
+            scrollOffset: following ? Number.MAX_SAFE_INTEGER : existing.scrollOffset,
+            appendSeq: existing.appendSeq + 1,
           },
         },
       };
@@ -219,7 +257,7 @@ function createClearLogs(set: SetState) {
       return {
         services: {
           ...state.services,
-          [serviceId]: { ...existing, logs: [], scrollOffset: 0 },
+          [serviceId]: { ...existing, logs: [], scrollOffset: Number.MAX_SAFE_INTEGER },
         },
       };
     });
@@ -387,32 +425,10 @@ function createScriptExecutionActions(
   };
 }
 
-function createVisualModeActions(
+function createFullscreenCursorActions(
   set: SetState,
-): Pick<
-  AppActions,
-  'enterVisualMode' | 'exitVisualMode' | 'moveVisualCursor' | 'setFullscreenCursor'
-> {
+): Pick<AppActions, 'setFullscreenCursor'> {
   return {
-    enterVisualMode: (startLine): void => {
-      set({
-        mode: 'visual',
-        visualModeState: { cursorLine: startLine, selectionStart: startLine },
-      });
-    },
-    exitVisualMode: (): void => {
-      set({ mode: 'fullscreen', visualModeState: null });
-    },
-    moveVisualCursor: (line): void => {
-      set((state) => {
-        if (state.visualModeState === null) {
-          return state;
-        }
-        return {
-          visualModeState: { ...state.visualModeState, cursorLine: line },
-        };
-      });
-    },
     setFullscreenCursor: (serviceId, line): void => {
       set((state) => {
         const existing = state.services[serviceId];
@@ -427,6 +443,121 @@ function createVisualModeActions(
         };
       });
     },
+  };
+}
+
+function clampToRange(index: number, count: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(count - 1, index));
+}
+
+function toggleWindowIds(
+  openWindowIds: readonly string[],
+  serviceId: string,
+): readonly string[] {
+  if (openWindowIds.includes(serviceId)) {
+    return openWindowIds.filter((id) => id !== serviceId);
+  }
+  if (openWindowIds.length >= MAX_WINDOWS) {
+    return openWindowIds;
+  }
+  return [...openWindowIds, serviceId];
+}
+
+type SidebarSelectionActionKeys = 'setViewMode' | 'setSidebarSelection' | 'openSidebarWindow';
+type SidebarWindowActionKeys = 'toggleSidebarWindow' | 'setFocusedWindow' | 'closeFocusedWindow';
+
+function createSidebarSelectionActions(
+  set: SetState,
+  get: GetState,
+): Pick<AppActions, SidebarSelectionActionKeys> {
+  return {
+    setViewMode: (mode): void => {
+      set({ viewMode: mode });
+    },
+    setSidebarSelection: (index): void => {
+      const count = get().config.services.length;
+      set((state) => ({
+        sidebarState: { ...state.sidebarState, selectedIndex: clampToRange(index, count) },
+      }));
+    },
+    openSidebarWindow: (serviceId): void => {
+      set((state) => ({
+        sidebarState: { ...state.sidebarState, openWindowIds: [serviceId], focusedWindowIndex: 0 },
+      }));
+    },
+  };
+}
+
+function createSidebarWindowActions(set: SetState): Pick<AppActions, SidebarWindowActionKeys> {
+  return {
+    toggleSidebarWindow: (serviceId): void => {
+      set((state) => {
+        const openWindowIds = toggleWindowIds(state.sidebarState.openWindowIds, serviceId);
+        const focusedWindowIndex = clampToRange(
+          state.sidebarState.focusedWindowIndex,
+          openWindowIds.length,
+        );
+        return { sidebarState: { ...state.sidebarState, openWindowIds, focusedWindowIndex } };
+      });
+    },
+    setFocusedWindow: (index): void => {
+      set((state) => ({
+        sidebarState: {
+          ...state.sidebarState,
+          focusedWindowIndex: clampToRange(index, state.sidebarState.openWindowIds.length),
+        },
+      }));
+    },
+    closeFocusedWindow: (): void => {
+      set((state) => {
+        const { openWindowIds, focusedWindowIndex } = state.sidebarState;
+        const next = openWindowIds.filter((_, i) => i !== focusedWindowIndex);
+        return {
+          sidebarState: {
+            ...state.sidebarState,
+            openWindowIds: next,
+            focusedWindowIndex: clampToRange(focusedWindowIndex, next.length),
+          },
+        };
+      });
+    },
+  };
+}
+
+function createSelectionActions(
+  set: SetState,
+): Pick<AppActions, 'startSelection' | 'updateSelectionHead' | 'clearSelection'> {
+  return {
+    startSelection: (serviceId, line): void => {
+      set({ selection: { serviceId, anchorLine: line, headLine: line } });
+    },
+    updateSelectionHead: (line): void => {
+      set((state) => {
+        if (state.selection === null) {
+          return state;
+        }
+        return { selection: { ...state.selection, headLine: line } };
+      });
+    },
+    clearSelection: (): void => {
+      set({ selection: null });
+    },
+  };
+}
+
+function resolveInitialViewMode(config: Config): ViewMode {
+  return config.services.length > SIDEBAR_AUTO_THRESHOLD ? 'sidebar' : 'grid';
+}
+
+function createInitialSidebarState(config: Config): SidebarState {
+  const firstId = config.services[0]?.id;
+  return {
+    selectedIndex: 0,
+    openWindowIds: firstId === undefined ? [] : [firstId],
+    focusedWindowIndex: 0,
   };
 }
 
@@ -469,7 +600,10 @@ function createStoreActions(set: SetState, get: GetState): AppActions {
     setNotification: (message): void => {
       set({ notification: message });
     },
-    ...createVisualModeActions(set),
+    ...createFullscreenCursorActions(set),
+    ...createSidebarSelectionActions(set, get),
+    ...createSidebarWindowActions(set),
+    ...createSelectionActions(set),
   };
 }
 
@@ -488,7 +622,9 @@ export function createAppStore(config: Config): AppStoreApi {
     scriptHistoryState: null,
     scriptHistory: [],
     notification: null,
-    visualModeState: null,
+    viewMode: resolveInitialViewMode(config),
+    sidebarState: createInitialSidebarState(config),
+    selection: null,
     ...createStoreActions(set, get),
   }));
 }

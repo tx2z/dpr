@@ -64,12 +64,28 @@ describe('parseConfig', () => {
     expect(() => parseConfig({ services: [{ id: 'api', start: 'npm run api' }] })).toThrow();
   });
 
-  it('should reject config with more than 6 services', () => {
-    const services = Array.from({ length: 7 }, (_, i) => ({
+  it('should reject config with more than 20 services', () => {
+    const services = Array.from({ length: 21 }, (_, i) => ({
       id: `service-${String(i)}`,
       start: 'npm start',
     }));
     expect(() => parseConfig({ services })).toThrow();
+  });
+
+  it('should accept up to 20 services', () => {
+    const services = Array.from({ length: 20 }, (_, i) => ({
+      id: `service-${String(i)}`,
+      start: 'npm start',
+    }));
+    expect(() => parseConfig({ services })).not.toThrow();
+  });
+
+  it('should reject columns greater than the column cap', () => {
+    const services = [
+      { id: 'api', start: 'npm run api' },
+      { id: 'web', start: 'npm run web' },
+    ];
+    expect(() => parseConfig({ columns: 8, services })).toThrow();
   });
 
   it('should reject duplicate service IDs', () => {

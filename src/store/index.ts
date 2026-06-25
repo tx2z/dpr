@@ -1,4 +1,4 @@
-export { createAppStore } from './app-store.js';
+export { createAppStore, MAX_WINDOWS } from './app-store.js';
 export type {
   AppStore,
   AppStoreApi,
@@ -9,5 +9,7 @@ export type {
   ScriptsMenuState,
   ScriptOutputState,
   ScriptHistoryState,
-  VisualModeState,
+  ViewMode,
+  SidebarState,
+  SelectionState,
 } from './app-store.js';

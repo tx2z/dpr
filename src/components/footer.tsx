@@ -1,10 +1,11 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
-import type { AppMode } from '../store/index.js';
+import type { AppMode, ViewMode } from '../store/index.js';
 
 export interface FooterProps {
   readonly mode: AppMode;
+  readonly viewMode?: ViewMode;
   readonly focusedIndex?: number | null;
   readonly commandInput?: string;
   readonly searchTerm?: string;
@@ -13,8 +14,25 @@ export interface FooterProps {
   readonly notification?: string | null;
 }
 
+// Service actions shared by both views; keep wording identical for consistency.
+const SERVICE_ACTIONS = '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [y/Y] copy';
+
 function getFocusedModeHint(): string {
-  return '[s] start · [x] stop · [K] kill · [r] scripts · [h] history · [y/Y] copy · [↑↓] scroll · [Enter] full · [Esc] back';
+  return `[1-9/←→/Tab] focus · ${SERVICE_ACTIONS} · [↑↓/g/G] scroll · [Enter] full · [v] stream · [t] sidebar · [Esc] back`;
+}
+
+function getSidebarHint(): string {
+  return `[jk] select · ${SERVICE_ACTIONS} · [ []/]/g/G] scroll · [Enter] show · [w] window · [Tab] win · [o] full · [v] stream · [t] grid · drag=copy`;
+}
+
+function SidebarFooter(): React.ReactElement {
+  return (
+    <Box borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text color="cyan" wrap="truncate">
+        {getSidebarHint()}
+      </Text>
+    </Box>
+  );
 }
 
 function CommandFooter({ commandInput }: { readonly commandInput: string }): React.ReactElement {
@@ -55,7 +73,9 @@ function SearchFooter({
 function FocusedFooter(): React.ReactElement {
   return (
     <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text color="cyan">{getFocusedModeHint()}</Text>
+      <Text color="cyan" wrap="truncate">
+        {getFocusedModeHint()}
+      </Text>
     </Box>
   );
 }
@@ -80,14 +100,25 @@ function NotificationFooter({
   );
 }
 
-function renderModeFooter(
-  mode: AppMode,
-  commandInput: string,
-  searchTerm: string,
-  matchCount: number,
-  currentMatch: number,
-  focusedIndex: number | null,
-): React.ReactElement {
+interface ModeFooterProps {
+  readonly mode: AppMode;
+  readonly viewMode: ViewMode;
+  readonly commandInput: string;
+  readonly searchTerm: string;
+  readonly matchCount: number;
+  readonly currentMatch: number;
+  readonly focusedIndex: number | null;
+}
+
+function renderModeFooter({
+  mode,
+  viewMode,
+  commandInput,
+  searchTerm,
+  matchCount,
+  currentMatch,
+  focusedIndex,
+}: ModeFooterProps): React.ReactElement {
   if (mode === 'command') {
     return <CommandFooter commandInput={commandInput} />;
   }
@@ -95,6 +126,9 @@ function renderModeFooter(
     return (
       <SearchFooter searchTerm={searchTerm} matchCount={matchCount} currentMatch={currentMatch} />
     );
+  }
+  if (viewMode === 'sidebar') {
+    return <SidebarFooter />;
   }
   if (focusedIndex !== null) {
     return <FocusedFooter />;
@@ -104,6 +138,7 @@ function renderModeFooter(
 
 export const Footer = React.memo(function Footer({
   mode,
+  viewMode = 'grid',
   focusedIndex = null,
   commandInput = '',
   searchTerm = '',
@@ -114,5 +149,13 @@ export const Footer = React.memo(function Footer({
   if (notification !== null) {
     return <NotificationFooter notification={notification} />;
   }
-  return renderModeFooter(mode, commandInput, searchTerm, matchCount, currentMatch, focusedIndex);
+  return renderModeFooter({
+    mode,
+    viewMode,
+    commandInput,
+    searchTerm,
+    matchCount,
+    currentMatch,
+    focusedIndex,
+  });
 });

@@ -12,6 +12,7 @@ export interface ServiceDisplay {
   readonly logs: readonly LogLine[];
   readonly scrollOffset: number;
   readonly fullscreenCursor: number | null;
+  readonly appendSeq: number;
 }
 
 export interface LayoutProps {
@@ -26,7 +27,11 @@ export interface LayoutProps {
   readonly onKill?: (serviceId: string) => void;
 }
 
-const HEADER_FOOTER_HEIGHT = 6;
+// Header (3) + Footer (3) = 6, plus 1 row of headroom so the panel grid never
+// fills the terminal exactly. A full-height frame makes ink repaint the whole
+// screen each tick (flicker), which happens whenever the available height
+// divides evenly by the number of grid rows.
+const HEADER_FOOTER_HEIGHT = 7;
 const MIN_HEIGHT = 10;
 
 function calculateColumns(

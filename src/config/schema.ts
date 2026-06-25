@@ -4,6 +4,7 @@ import {
   DEFAULT_COLORS,
   DEFAULT_LOGS_DIR,
   DEFAULT_READY_DELAY,
+  MAX_COLUMNS,
   MAX_SERVICES,
   MIN_SERVICES,
 } from './types.js';
@@ -61,7 +62,7 @@ const serviceSchema = z.object({
   scripts: z.array(scriptSchema).default([]),
 });
 
-const columnsSchema = z.union([z.number().int().positive().max(MAX_SERVICES), z.literal('auto')]);
+const columnsSchema = z.union([z.number().int().positive().max(MAX_COLUMNS), z.literal('auto')]);
 
 interface ConfigData {
   services: z.infer<typeof serviceSchema>[];

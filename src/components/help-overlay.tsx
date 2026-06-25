@@ -35,14 +35,21 @@ export function HelpOverlay(): React.ReactElement {
       <Box marginTop={1} marginBottom={1}>
         <Text bold>fullscreen mode (when in fullscreen)</Text>
       </Box>
-      <Text>
-        [↑↓/jk] cursor · [←→] page · [g/G] top/bottom · [v] visual · [y/Y] copy visible/all
-      </Text>
+      <Text>[↑↓/jk] cursor · [←→] page · [g/G] top/bottom · [y/Y] copy visible/all</Text>
+
+      <Box marginTop={1} marginBottom={1}>
+        <Text bold>sidebar view</Text>
+      </Box>
+      <Text>[↑↓/jk] select · [Enter] show · [w] add window · [Tab] focus window</Text>
+      <Text>[ []/] · g/G] scroll window · [c] close window · [o] fullscreen · [t] toggle grid</Text>
+      <Text>drag in a window with the mouse to select &amp; copy log lines</Text>
+      <Text>[v] stream mode — logs in native scrollback you can select char-by-char</Text>
 
       <Box marginTop={1} marginBottom={1}>
         <Text bold>other</Text>
       </Box>
-      <Text>[?] help · [f] find in logs</Text>
+      <Text>[?] help · [f] find in logs · [t] toggle sidebar/grid</Text>
+      <Text color="gray">Select log text with the mouse and copy with your terminal (Cmd+C)</Text>
 
       <Box marginTop={1}>
         <Text color="gray">[Esc] close</Text>

@@ -83,7 +83,9 @@ export const DEFAULT_COLORS: readonly ServiceColor[] = [
 ];
 
 export const MIN_SERVICES = 2;
-export const MAX_SERVICES = 6;
+export const MAX_SERVICES = 20;
+export const MAX_COLUMNS = 6;
+export const SIDEBAR_AUTO_THRESHOLD = 6;
 export const DEFAULT_READY_DELAY = 500;
 export const DEFAULT_LOGS_DIR = '~/.dpr/logs';
 export const LOG_BUFFER_SIZE = 1000;

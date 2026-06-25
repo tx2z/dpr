@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-import { Box, useApp, useInput } from 'ink';
+import { Box, useApp, useInput, useStdout } from 'ink';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { useStore } from 'zustand';
 
@@ -10,24 +10,36 @@ import {
   Header,
   HelpOverlay,
   Layout,
+  MainArea,
   ScriptHistoryOverlay,
   ScriptOutputOverlay,
   ScriptsOverlay,
+  Sidebar,
+  StreamView,
+  computeWindowRows,
 } from './components/index.js';
+import { SIDEBAR_AUTO_THRESHOLD } from './config/index.js';
 import { useCommands, useMouse, useSearch, useServiceManager } from './hooks/index.js';
-import { createAppStore } from './store/index.js';
+import { createAppStore, MAX_WINDOWS } from './store/index.js';
 import {
   calculateNextFocusIndex,
   calculatePrevFocusIndex,
   copyToClipboard,
+  hitTestWindow,
   parseNumberKeyFocus,
 } from './utils/index.js';
 
 import type { ServiceDisplay } from './components/index.js';
 import type { Config, ScriptExecution, ServiceState } from './config/index.js';
-import type { UseCommandsResult, UseSearchResult, UseServiceManagerResult } from './hooks/index.js';
+import type {
+  MouseDragHandlers,
+  UseCommandsResult,
+  UseSearchResult,
+  UseServiceManagerResult,
+} from './hooks/index.js';
 import type {
   AppMode,
+  AppStore,
   AppStoreApi,
   ScriptHistoryState,
   ScriptsMenuState,
@@ -35,8 +47,11 @@ import type {
   SearchMatch,
   SearchState,
   ServiceRuntime,
-  VisualModeState,
+  SidebarState,
+  SelectionState,
+  ViewMode,
 } from './store/index.js';
+import type { HitGeometry } from './utils/index.js';
 
 export interface AppProps {
   readonly config: Config;
@@ -86,12 +101,6 @@ interface KeyHandlers {
   readonly historyScrollDown: () => void;
   readonly historyScrollToTop: () => void;
   readonly historyScrollToBottom: () => void;
-  // Visual mode actions
-  readonly enterVisualMode: () => void;
-  readonly exitVisualMode: () => void;
-  readonly visualCursorUp: () => void;
-  readonly visualCursorDown: () => void;
-  readonly copyVisualSelection: () => void;
   // Fullscreen cursor handlers
   readonly initFullscreenCursor: () => void;
   readonly fullscreenCursorUp: () => void;
@@ -100,6 +109,17 @@ interface KeyHandlers {
   readonly fullscreenCursorPageDown: () => void;
   readonly fullscreenCursorToTop: () => void;
   readonly fullscreenCursorToBottom: () => void;
+  // Sidebar view actions
+  readonly sidebarUp: () => void;
+  readonly sidebarDown: () => void;
+  readonly sidebarOpenWindow: () => void;
+  readonly sidebarToggleWindow: () => void;
+  readonly sidebarFocusNext: () => void;
+  readonly sidebarFocusPrev: () => void;
+  readonly sidebarCloseWindow: () => void;
+  readonly sidebarFullscreenWindow: () => void;
+  readonly toggleViewMode: () => void;
+  readonly enterStreamView: () => void;
 }
 
 interface KeyState {
@@ -130,6 +150,14 @@ const DEFAULT_SERVICE_STATE: ServiceState = {
   exitCode: null,
   startedAt: null,
   waitingFor: [],
+};
+
+const DEFAULT_SERVICE_RUNTIME: ServiceRuntime = {
+  state: DEFAULT_SERVICE_STATE,
+  logs: [],
+  scrollOffset: 0,
+  fullscreenCursor: null,
+  appendSeq: 0,
 };
 
 function isQuitInput(input: string, key: KeyState): boolean {
@@ -268,32 +296,12 @@ function handleFullscreenModeInput(input: string, key: KeyState, handlers: KeyHa
   }
   if (input === 'Y') {
     handlers.copyAllLogs();
-    return;
-  }
-  if (input === 'v') {
-    handlers.enterVisualMode();
   }
 }
 
-function handleVisualModeInput(input: string, key: KeyState, handlers: KeyHandlers): void {
-  if (key.escape) {
-    handlers.exitVisualMode();
-    return;
-  }
-  if (key.upArrow || input === 'k') {
-    handlers.visualCursorUp();
-    return;
-  }
-  if (key.downArrow || input === 'j') {
-    handlers.visualCursorDown();
-    return;
-  }
-  if (input === 'y') {
-    handlers.copyVisualSelection();
-    return;
-  }
-  if (input === 'Y') {
-    handlers.copyAllLogs();
+function handleStreamModeInput(input: string, key: KeyState, handlers: KeyHandlers): void {
+  if (key.escape || input === 'q') {
+    handlers.setMode('normal');
   }
 }
 
@@ -566,6 +574,14 @@ function handleNormalModeInput(
   if (handleModeSwitch(input, handlers)) {
     return;
   }
+  if (input === 't') {
+    handlers.toggleViewMode();
+    return;
+  }
+  if (input === 'v') {
+    handlers.enterStreamView();
+    return;
+  }
   if (handleServiceActions(input, focusedSpaceIndex, handlers)) {
     return;
   }
@@ -573,6 +589,136 @@ function handleNormalModeInput(
     return;
   }
   handleFocusNavigation(input, key, serviceCount, focusedSpaceIndex, handlers);
+}
+
+function resolveViewMode(serviceCount: number, current: ViewMode): ViewMode {
+  if (serviceCount > SIDEBAR_AUTO_THRESHOLD) {
+    return 'sidebar';
+  }
+  return current;
+}
+
+function handleSidebarMove(input: string, key: KeyState, handlers: KeyHandlers): boolean {
+  if (key.upArrow || input === 'k') {
+    handlers.sidebarUp();
+    return true;
+  }
+  if (key.downArrow || input === 'j') {
+    handlers.sidebarDown();
+    return true;
+  }
+  if (key.tab && key.shift) {
+    handlers.sidebarFocusPrev();
+    return true;
+  }
+  if (key.tab) {
+    handlers.sidebarFocusNext();
+    return true;
+  }
+  return false;
+}
+
+function handleSidebarWindowKeys(input: string, key: KeyState, handlers: KeyHandlers): boolean {
+  if (key.return) {
+    handlers.sidebarOpenWindow();
+    return true;
+  }
+  if (input === 'w') {
+    handlers.sidebarToggleWindow();
+    return true;
+  }
+  if (input === 'c') {
+    handlers.sidebarCloseWindow();
+    return true;
+  }
+  if (input === 'o') {
+    handlers.sidebarFullscreenWindow();
+    return true;
+  }
+  return false;
+}
+
+function handleSidebarScroll(input: string, handlers: KeyHandlers): boolean {
+  if (input === '[') {
+    handlers.scrollPageUp();
+    return true;
+  }
+  if (input === ']') {
+    handlers.scrollPageDown();
+    return true;
+  }
+  if (input === 'g') {
+    handlers.scrollToTop();
+    return true;
+  }
+  if (input === 'G') {
+    handlers.scrollToBottom();
+    return true;
+  }
+  return false;
+}
+
+function handleSidebarServiceActions(input: string, handlers: KeyHandlers): boolean {
+  if (input === 's') {
+    handlers.startFocusedService();
+    return true;
+  }
+  if (input === 'x') {
+    handlers.stopFocusedService();
+    return true;
+  }
+  if (input === 'K') {
+    handlers.killFocusedService();
+    return true;
+  }
+  if (input === 'r') {
+    handlers.openScriptsMenu();
+    return true;
+  }
+  if (input === 'h') {
+    handlers.openServiceHistory();
+    return true;
+  }
+  if (input === 'y') {
+    handlers.copyVisibleLogs();
+    return true;
+  }
+  if (input === 'Y') {
+    handlers.copyAllLogs();
+    return true;
+  }
+  return false;
+}
+
+function handleSidebarNormalInput(input: string, key: KeyState, handlers: KeyHandlers): void {
+  if (isQuitInput(input, key)) {
+    handlers.quit();
+    return;
+  }
+  if (input === 't') {
+    handlers.toggleViewMode();
+    return;
+  }
+  if (input === 'v') {
+    handlers.enterStreamView();
+    return;
+  }
+  if (handleGlobalCommands(input, handlers)) {
+    return;
+  }
+  if (handleModeSwitch(input, handlers)) {
+    return;
+  }
+  if (handleSidebarMove(input, key, handlers)) {
+    return;
+  }
+  if (handleSidebarWindowKeys(input, key, handlers)) {
+    return;
+  }
+  if (handleSidebarScroll(input, handlers)) {
+    return;
+  }
+  handleSidebarServiceActions(input, handlers);
 }
 
 function buildServiceDisplay(
@@ -584,12 +730,14 @@ function buildServiceDisplay(
   if (serviceConfig === undefined) {
     throw new Error(`Service not found: ${serviceId}`);
   }
+  const rt = runtime ?? DEFAULT_SERVICE_RUNTIME;
   return {
     config: serviceConfig,
-    state: runtime?.state ?? DEFAULT_SERVICE_STATE,
-    logs: runtime?.logs ?? [],
-    scrollOffset: runtime?.scrollOffset ?? 0,
-    fullscreenCursor: runtime?.fullscreenCursor ?? null,
+    state: rt.state,
+    logs: rt.logs,
+    scrollOffset: rt.scrollOffset,
+    fullscreenCursor: rt.fullscreenCursor,
+    appendSeq: rt.appendSeq,
   };
 }
 
@@ -612,7 +760,9 @@ interface AppState {
   scriptHistoryState: ScriptHistoryState | null;
   scriptHistory: readonly ScriptExecution[];
   notification: string | null;
-  visualModeState: VisualModeState | null;
+  viewMode: ViewMode;
+  sidebarState: SidebarState;
+  selection: SelectionState | null;
 }
 
 interface AppActions {
@@ -634,7 +784,9 @@ function useAppState(store: AppStoreApi): AppState {
   const scriptHistoryState = useStore(store, (s) => s.scriptHistoryState);
   const scriptHistory = useStore(store, (s) => s.scriptHistory);
   const notification = useStore(store, (s) => s.notification);
-  const visualModeState = useStore(store, (s) => s.visualModeState);
+  const viewMode = useStore(store, (s) => s.viewMode);
+  const sidebarState = useStore(store, (s) => s.sidebarState);
+  const selection = useStore(store, (s) => s.selection);
 
   return {
     config,
@@ -648,7 +800,9 @@ function useAppState(store: AppStoreApi): AppState {
     scriptHistoryState,
     scriptHistory,
     notification,
-    visualModeState,
+    viewMode,
+    sidebarState,
+    selection,
   };
 }
 
@@ -677,40 +831,71 @@ function getMatchCount(searchState: SearchState | null): number {
   return searchState?.matches.length ?? 0;
 }
 
-function dispatchInput(input: string, key: KeyState, state: AppState, handlers: KeyHandlers): void {
+// Text-entry / overlay modes that consume all input. Returns true when handled.
+function dispatchEditModes(
+  input: string,
+  key: KeyState,
+  state: AppState,
+  handlers: KeyHandlers,
+): boolean {
   if (state.mode === 'command') {
     handleCommandModeInput(input, key, state.commandInput, handlers);
-    return;
+    return true;
   }
   if (state.mode === 'search') {
     handleSearchModeInput(input, key, state.searchState, handlers);
-    return;
+    return true;
   }
   if (state.mode === 'help') {
     // Any key closes help
     handlers.setMode('normal');
-    return;
+    return true;
   }
+  return false;
+}
+
+// Full-screen log/script views. Returns true when handled.
+function dispatchViewModes(
+  input: string,
+  key: KeyState,
+  state: AppState,
+  handlers: KeyHandlers,
+): boolean {
   if (state.mode === 'fullscreen') {
     handleFullscreenModeInput(input, key, handlers);
-    return;
+    return true;
   }
-  if (state.mode === 'visual') {
-    handleVisualModeInput(input, key, handlers);
-    return;
+  if (state.mode === 'stream') {
+    handleStreamModeInput(input, key, handlers);
+    return true;
   }
   if (state.mode === 'scriptOutput') {
     handleScriptOutputModeInput(key, handlers);
-    return;
+    return true;
   }
   if (state.mode === 'scriptHistory') {
     handleScriptHistoryModeInput(input, key, handlers);
-    return;
+    return true;
   }
   if (state.mode === 'scripts') {
     const isCollectingParams =
       state.scriptsMenuState !== null && state.scriptsMenuState.currentParamIndex >= 0;
     handleScriptsModeInput(input, key, handlers, isCollectingParams);
+    return true;
+  }
+  return false;
+}
+
+function dispatchInput(input: string, key: KeyState, state: AppState, handlers: KeyHandlers): void {
+  if (dispatchEditModes(input, key, state, handlers)) {
+    return;
+  }
+  if (dispatchViewModes(input, key, state, handlers)) {
+    return;
+  }
+  const activeView = resolveViewMode(state.config.services.length, state.viewMode);
+  if (activeView === 'sidebar') {
+    handleSidebarNormalInput(input, key, handlers);
     return;
   }
   handleNormalModeInput(
@@ -729,6 +914,7 @@ interface ScrollContext {
 }
 
 interface ServiceActionContext {
+  readonly store: AppStoreApi;
   readonly config: Config;
   readonly focusedSpaceIndex: number | null;
   readonly startService: (serviceId: string) => void;
@@ -749,19 +935,38 @@ interface ScriptsContext {
   ) => void;
 }
 
+// Resolves the service that keyboard service-actions (start/stop/kill/scripts) target.
+// In sidebar view this is the highlighted item; otherwise the focused grid panel.
+function resolveActionServiceId(state: AppStore): string | null {
+  if (state.viewMode === 'sidebar' && state.mode !== 'fullscreen') {
+    return state.config.services[state.sidebarState.selectedIndex]?.id ?? null;
+  }
+  if (state.focusedSpaceIndex === null) {
+    return null;
+  }
+  return state.config.services[state.focusedSpaceIndex]?.id ?? null;
+}
+
+// Resolves the service that scroll/copy actions target.
+// In sidebar view this is the focused window; otherwise the focused grid panel.
+function resolveScrollServiceId(state: AppStore): string | null {
+  if (state.viewMode === 'sidebar' && state.mode !== 'fullscreen') {
+    const { openWindowIds, focusedWindowIndex } = state.sidebarState;
+    return openWindowIds[focusedWindowIndex] ?? null;
+  }
+  if (state.focusedSpaceIndex === null) {
+    return null;
+  }
+  return state.config.services[state.focusedSpaceIndex]?.id ?? null;
+}
+
 function createServiceActionHandlers(
   ctx: ServiceActionContext,
 ): Pick<
   KeyHandlers,
   'startFocusedService' | 'stopFocusedService' | 'killFocusedService' | 'startAll' | 'stopAll'
 > {
-  const getFocusedServiceId = (): string | null => {
-    if (ctx.focusedSpaceIndex === null) {
-      return null;
-    }
-    const service = ctx.config.services[ctx.focusedSpaceIndex];
-    return service?.id ?? null;
-  };
+  const getFocusedServiceId = (): string | null => resolveActionServiceId(ctx.store.getState());
 
   return {
     startFocusedService: (): void => {
@@ -805,16 +1010,12 @@ interface FocusedService {
 
 function getFocusedServiceFromContext(ctx: ScrollContext): FocusedService | null {
   const state = ctx.store.getState();
-  const focusedIndex = state.focusedSpaceIndex;
-  if (focusedIndex === null) {
+  const serviceId = resolveScrollServiceId(state);
+  if (serviceId === null) {
     return null;
   }
-  const service = ctx.config.services[focusedIndex];
-  if (service === undefined) {
-    return null;
-  }
-  const runtime = state.services[service.id];
-  return runtime ? { serviceId: service.id, runtime } : null;
+  const runtime = state.services[serviceId];
+  return runtime ? { serviceId, runtime } : null;
 }
 
 function getClampedOffset(runtime: ServiceRuntime): number {
@@ -852,8 +1053,8 @@ function createScrollHandlers(ctx: ScrollContext): Pick<KeyHandlers, ScrollHandl
     scrollToBottom: (): void => {
       const focused = getFocusedServiceFromContext(ctx);
       if (focused !== null) {
-        const maxOffset = Math.max(0, focused.runtime.logs.length - 1);
-        ctx.store.getState().setScrollOffset(focused.serviceId, maxOffset);
+        // Re-enter follow mode so new lines keep tailing (sentinel offset).
+        ctx.store.getState().setScrollOffset(focused.serviceId, Number.MAX_SAFE_INTEGER);
       }
     },
   };
@@ -866,15 +1067,15 @@ function calculateVisibleLines(ctx: ScrollContext): number {
   const isFullscreen = state.mode === 'fullscreen';
 
   if (isFullscreen) {
-    // Fullscreen: terminal height - 6 (header, footer, borders)
-    return Math.max(1, termHeight - 6);
+    // Fullscreen: matches FullscreenOverlay's LogView height (see that component).
+    return Math.max(1, termHeight - 10);
   }
 
   // Normal mode: calculate based on panel layout
   const serviceCount = ctx.config.services.length;
   const columns = calculateColumns(ctx.config.global.columns, serviceCount);
   const rows = Math.ceil(serviceCount / columns);
-  const availableHeight = termHeight - 6; // header + footer
+  const availableHeight = termHeight - 7; // header + footer + 1 row headroom (see Layout)
   const panelHeight = Math.floor(availableHeight / rows);
   const contentHeight = panelHeight - 4; // panel border + header
   return Math.max(1, contentHeight);
@@ -920,13 +1121,6 @@ function createCopyHandlers(
   };
 }
 
-type VisualModeHandlerKeys =
-  | 'enterVisualMode'
-  | 'exitVisualMode'
-  | 'visualCursorUp'
-  | 'visualCursorDown'
-  | 'copyVisualSelection';
-
 type FullscreenCursorHandlerKeys =
   | 'initFullscreenCursor'
   | 'fullscreenCursorUp'
@@ -935,35 +1129,6 @@ type FullscreenCursorHandlerKeys =
   | 'fullscreenCursorPageDown'
   | 'fullscreenCursorToTop'
   | 'fullscreenCursorToBottom';
-
-interface FocusedLogs {
-  readonly logs: readonly { content: string }[];
-  readonly logCount: number;
-}
-
-function getFocusedLogs(ctx: ScrollContext): FocusedLogs | null {
-  const focused = getFocusedServiceFromContext(ctx);
-  if (focused === null) return null;
-  return { logs: focused.runtime.logs, logCount: focused.runtime.logs.length };
-}
-
-function performVisualCopy(ctx: ScrollContext): void {
-  const state = ctx.store.getState();
-  const data = getFocusedLogs(ctx);
-  if (state.visualModeState === null || data === null) return;
-  const { cursorLine, selectionStart } = state.visualModeState;
-  const startLine = Math.min(cursorLine, selectionStart);
-  const endLine = Math.max(cursorLine, selectionStart);
-  const selectedLogs = data.logs.slice(startLine, endLine + 1);
-  const text = selectedLogs.map((line) => line.content).join('\n');
-  const success = copyToClipboard(text);
-  const message = success ? `Copied ${String(selectedLogs.length)} lines` : 'Failed to copy';
-  state.setNotification(message);
-  state.exitVisualMode();
-  setTimeout(() => {
-    ctx.store.getState().setNotification(null);
-  }, 2000);
-}
 
 function scrollToCursor(ctx: ScrollContext, cursorLine: number): void {
   const focused = getFocusedServiceFromContext(ctx);
@@ -978,41 +1143,6 @@ function scrollToCursor(ctx: ScrollContext, cursorLine: number): void {
   if (cursorLine >= currentOffset + visibleLines) {
     ctx.store.getState().setScrollOffset(focused.serviceId, cursorLine - visibleLines + 1);
   }
-}
-
-function createVisualModeHandlers(ctx: ScrollContext): Pick<KeyHandlers, VisualModeHandlerKeys> {
-  return {
-    enterVisualMode: (): void => {
-      const focused = getFocusedServiceFromContext(ctx);
-      const data = getFocusedLogs(ctx);
-      if (focused === null || data === null || data.logCount === 0) return;
-      // Use fullscreen cursor if available, otherwise start at last line
-      const startLine = focused.runtime.fullscreenCursor ?? Math.max(0, data.logCount - 1);
-      ctx.store.getState().enterVisualMode(startLine);
-      scrollToCursor(ctx, startLine);
-    },
-    exitVisualMode: (): void => {
-      ctx.store.getState().exitVisualMode();
-    },
-    visualCursorUp: (): void => {
-      const state = ctx.store.getState();
-      if (state.visualModeState === null) return;
-      const newLine = Math.max(0, state.visualModeState.cursorLine - 1);
-      state.moveVisualCursor(newLine);
-      scrollToCursor(ctx, newLine);
-    },
-    visualCursorDown: (): void => {
-      const state = ctx.store.getState();
-      const data = getFocusedLogs(ctx);
-      if (state.visualModeState === null || data === null) return;
-      const newLine = Math.min(data.logCount - 1, state.visualModeState.cursorLine + 1);
-      state.moveVisualCursor(newLine);
-      scrollToCursor(ctx, newLine);
-    },
-    copyVisualSelection: (): void => {
-      performVisualCopy(ctx);
-    },
-  };
 }
 
 function moveFullscreenCursor(ctx: ScrollContext, newLine: number): void {
@@ -1071,6 +1201,135 @@ function createFullscreenCursorHandlers(
       if (focused === null) return;
       const maxLine = Math.max(0, focused.runtime.logs.length - 1);
       moveFullscreenCursor(ctx, maxLine);
+    },
+  };
+}
+
+const NOTIFICATION_MS = 2000;
+
+function notifyTemporarily(store: AppStoreApi, message: string): void {
+  store.getState().setNotification(message);
+  setTimeout(() => {
+    store.getState().setNotification(null);
+  }, NOTIFICATION_MS);
+}
+
+function getSidebarSelectedId(state: AppStore): string | undefined {
+  return state.config.services[state.sidebarState.selectedIndex]?.id;
+}
+
+type SidebarSelectionKeys =
+  | 'sidebarUp'
+  | 'sidebarDown'
+  | 'sidebarOpenWindow'
+  | 'sidebarToggleWindow';
+
+function createSidebarSelectionHandlers(
+  ctx: ScrollContext,
+): Pick<KeyHandlers, SidebarSelectionKeys> {
+  return {
+    sidebarUp: (): void => {
+      const state = ctx.store.getState();
+      state.setSidebarSelection(state.sidebarState.selectedIndex - 1);
+    },
+    sidebarDown: (): void => {
+      const state = ctx.store.getState();
+      state.setSidebarSelection(state.sidebarState.selectedIndex + 1);
+    },
+    sidebarOpenWindow: (): void => {
+      const state = ctx.store.getState();
+      const serviceId = getSidebarSelectedId(state);
+      if (serviceId !== undefined) {
+        state.openSidebarWindow(serviceId);
+      }
+    },
+    sidebarToggleWindow: (): void => {
+      const state = ctx.store.getState();
+      const serviceId = getSidebarSelectedId(state);
+      if (serviceId === undefined) {
+        return;
+      }
+      const { openWindowIds } = state.sidebarState;
+      if (!openWindowIds.includes(serviceId) && openWindowIds.length >= MAX_WINDOWS) {
+        notifyTemporarily(ctx.store, `Max ${String(MAX_WINDOWS)} windows`);
+        return;
+      }
+      state.toggleSidebarWindow(serviceId);
+    },
+  };
+}
+
+type SidebarWindowKeys =
+  | 'sidebarFocusNext'
+  | 'sidebarFocusPrev'
+  | 'sidebarCloseWindow'
+  | 'sidebarFullscreenWindow'
+  | 'toggleViewMode';
+
+// Zoom the focused window: reuse the grid fullscreen path by pointing
+// focusedSpaceIndex at that service and switching to fullscreen mode.
+function enterWindowFullscreen(state: AppStore): void {
+  const { openWindowIds, focusedWindowIndex } = state.sidebarState;
+  const serviceId = openWindowIds[focusedWindowIndex];
+  if (serviceId === undefined) {
+    return;
+  }
+  const index = state.config.services.findIndex((s) => s.id === serviceId);
+  if (index < 0) {
+    return;
+  }
+  state.setFocusedSpace(index);
+  state.setMode('fullscreen');
+  state.clearSelection();
+}
+
+function createSidebarWindowHandlers(ctx: ScrollContext): Pick<KeyHandlers, SidebarWindowKeys> {
+  return {
+    sidebarFocusNext: (): void => {
+      const state = ctx.store.getState();
+      const len = state.sidebarState.openWindowIds.length;
+      if (len > 0) {
+        state.setFocusedWindow(calculateNextFocusIndex(state.sidebarState.focusedWindowIndex, len));
+      }
+    },
+    sidebarFocusPrev: (): void => {
+      const state = ctx.store.getState();
+      const len = state.sidebarState.openWindowIds.length;
+      if (len > 0) {
+        state.setFocusedWindow(calculatePrevFocusIndex(state.sidebarState.focusedWindowIndex, len));
+      }
+    },
+    sidebarCloseWindow: (): void => {
+      ctx.store.getState().closeFocusedWindow();
+    },
+    sidebarFullscreenWindow: (): void => {
+      enterWindowFullscreen(ctx.store.getState());
+    },
+    toggleViewMode: (): void => {
+      const state = ctx.store.getState();
+      if (state.config.services.length > SIDEBAR_AUTO_THRESHOLD) {
+        notifyTemporarily(ctx.store, `Sidebar required above ${String(SIDEBAR_AUTO_THRESHOLD)}`);
+        return;
+      }
+      state.setViewMode(state.viewMode === 'sidebar' ? 'grid' : 'sidebar');
+    },
+  };
+}
+
+function createStreamHandlers(ctx: ScrollContext): Pick<KeyHandlers, 'enterStreamView'> {
+  return {
+    enterStreamView: (): void => {
+      const state = ctx.store.getState();
+      const serviceId = resolveActionServiceId(state);
+      if (serviceId === null) {
+        return;
+      }
+      const index = state.config.services.findIndex((s) => s.id === serviceId);
+      if (index < 0) {
+        return;
+      }
+      state.setFocusedSpace(index);
+      state.setMode('stream');
     },
   };
 }
@@ -1270,11 +1529,7 @@ function createHistoryHandlers(ctx: ScriptsContext): Pick<KeyHandlers, HistoryHa
 }
 
 function createScriptsHandlers(ctx: ScriptsContext): Pick<KeyHandlers, ScriptsHandlerKeys> {
-  const getFocusedServiceId = (): string | null => {
-    if (ctx.focusedSpaceIndex === null) return null;
-    const service = ctx.config.services[ctx.focusedSpaceIndex];
-    return service?.id ?? null;
-  };
+  const getFocusedServiceId = (): string | null => resolveActionServiceId(ctx.store.getState());
 
   const menuHandlers = createScriptsMenuHandlers(ctx);
   const historyHandlers = createHistoryHandlers(ctx);
@@ -1317,8 +1572,10 @@ function useKeyHandlers(
   return useMemo(() => {
     const scrollHandlers = createScrollHandlers(scrollCtx);
     const copyHandlers = createCopyHandlers(scrollCtx);
-    const visualModeHandlers = createVisualModeHandlers(scrollCtx);
     const fullscreenCursorHandlers = createFullscreenCursorHandlers(scrollCtx);
+    const sidebarSelectionHandlers = createSidebarSelectionHandlers(scrollCtx);
+    const sidebarWindowHandlers = createSidebarWindowHandlers(scrollCtx);
+    const streamHandlers = createStreamHandlers(scrollCtx);
     const serviceHandlers = createServiceActionHandlers(serviceCtx);
     const scriptsHandlers = createScriptsHandlers(scriptsCtx);
     return {
@@ -1330,8 +1587,10 @@ function useKeyHandlers(
       prevMatch: search.prevMatch,
       ...scrollHandlers,
       ...copyHandlers,
-      ...visualModeHandlers,
       ...fullscreenCursorHandlers,
+      ...sidebarSelectionHandlers,
+      ...sidebarWindowHandlers,
+      ...streamHandlers,
       ...serviceHandlers,
       ...scriptsHandlers,
     };
@@ -1356,11 +1615,13 @@ function useScrollContext(store: AppStoreApi, state: AppState): ScrollContext {
 }
 
 function useServiceContext(
+  store: AppStoreApi,
   state: AppState,
   serviceManager: UseServiceManagerResult,
 ): ServiceActionContext {
   return useMemo(
     () => ({
+      store,
       config: state.config,
       focusedSpaceIndex: state.focusedSpaceIndex,
       startService: serviceManager.startService,
@@ -1369,7 +1630,7 @@ function useServiceContext(
       startAll: serviceManager.startAll,
       stopAll: serviceManager.stopAll,
     }),
-    [state.config, state.focusedSpaceIndex, serviceManager],
+    [store, state.config, state.focusedSpaceIndex, serviceManager],
   );
 }
 
@@ -1400,7 +1661,6 @@ function FullscreenView({
   if (focusedService === undefined) {
     return null;
   }
-  const isVisualMode = state.mode === 'visual';
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Header projectName={state.config.global.name} />
@@ -1412,12 +1672,24 @@ function FullscreenView({
         searchTerm={getSearchTerm(state.searchState)}
         searchMatches={getSearchMatches(state.searchState)}
         currentMatchIndex={getCurrentMatchIndex(state.searchState)}
-        visualModeState={state.visualModeState}
-        isVisualMode={isVisualMode}
         fullscreenCursor={focusedService.fullscreenCursor}
       />
     </Box>
   );
+}
+
+function StreamModeView({
+  state,
+  serviceDisplays,
+}: FullscreenViewProps): React.ReactElement | null {
+  if (state.focusedSpaceIndex === null) {
+    return null;
+  }
+  const service = serviceDisplays[state.focusedSpaceIndex];
+  if (service === undefined) {
+    return null;
+  }
+  return <StreamView service={service} />;
 }
 
 interface MainViewProps {
@@ -1454,15 +1726,177 @@ function MainView({ state, serviceDisplays, serviceManager }: MainViewProps): Re
   );
 }
 
-interface MouseConfig {
-  readonly serviceCount: number;
-  readonly columns: number | 'auto';
+const SIDEBAR_WIDTH_MAX = 30;
+const SIDEBAR_WIDTH_MIN = 16;
+
+function getSidebarWidth(terminalWidth: number): number {
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.floor(terminalWidth / 4)));
 }
 
-interface MouseHandlersResult {
-  readonly onScrollUp: () => void;
-  readonly onScrollDown: () => void;
-  readonly onClick: (col: number, row: number) => void;
+function resolveWindows(
+  serviceDisplays: readonly ServiceDisplay[],
+  openWindowIds: readonly string[],
+): ServiceDisplay[] {
+  return openWindowIds
+    .map((id) => serviceDisplays.find((s) => s.config.id === id))
+    .filter((s): s is ServiceDisplay => s !== undefined);
+}
+
+interface SidebarViewProps {
+  readonly state: AppState;
+  readonly serviceDisplays: ServiceDisplay[];
+}
+
+function SidebarView({ state, serviceDisplays }: SidebarViewProps): React.ReactElement {
+  const { stdout } = useStdout();
+  const sidebarWidth = getSidebarWidth(stdout.columns);
+  // Header (3) + Footer (3) = 6, plus one row of headroom so the frame never
+  // fills the terminal exactly. A full-height frame makes ink repaint the whole
+  // screen each tick (flicker); the grid view leaves slack the same way.
+  const contentHeight = Math.max(8, stdout.rows - 7);
+  const windows = resolveWindows(serviceDisplays, state.sidebarState.openWindowIds);
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      <Header projectName={state.config.global.name} />
+      <Box flexDirection="row" flexGrow={1}>
+        <Sidebar
+          services={serviceDisplays}
+          selectedIndex={state.sidebarState.selectedIndex}
+          openWindowIds={state.sidebarState.openWindowIds}
+          width={sidebarWidth}
+          height={contentHeight}
+        />
+        <MainArea
+          windows={windows}
+          focusedWindowIndex={state.sidebarState.focusedWindowIndex}
+          width={stdout.columns - sidebarWidth}
+          height={contentHeight}
+          searchTerm={getSearchTerm(state.searchState)}
+          searchMatches={getSearchMatches(state.searchState)}
+          currentMatchIndex={getCurrentMatchIndex(state.searchState)}
+          selection={state.selection}
+        />
+      </Box>
+      <Footer
+        mode={state.mode}
+        viewMode="sidebar"
+        focusedIndex={state.focusedSpaceIndex}
+        commandInput={state.commandInput}
+        searchTerm={getSearchTerm(state.searchState)}
+        matchCount={getMatchCount(state.searchState)}
+        currentMatch={getCurrentMatchIndex(state.searchState)}
+        notification={state.notification}
+      />
+    </Box>
+  );
+}
+
+const SIDEBAR_MIDDLE_TOP = 4; // first row after the 3-row Header
+const WINDOW_CHROME_TOP = 2; // window top border + header, before the log lines
+const WINDOW_CHROME_TOTAL = 3; // top border + header + bottom border
+
+// Computes where each stacked window's log lines sit on screen, so a mouse
+// coordinate can be mapped to a service + log line. Mirrors SidebarView/MainArea.
+function buildHitGeometry(store: AppStoreApi): HitGeometry {
+  const state = store.getState();
+  const { stdout } = process;
+  const sidebarWidth = getSidebarWidth(stdout.columns);
+  const contentHeight = Math.max(8, stdout.rows - 7);
+  const ids = state.sidebarState.openWindowIds;
+  const heights = computeWindowRows(ids.length, contentHeight);
+  let rowCursor = SIDEBAR_MIDDLE_TOP;
+  const windows = ids.map((id, i) => {
+    const runtime = state.services[id];
+    const logs = runtime?.logs ?? [];
+    const h = heights[i] ?? 0;
+    const logviewHeight = Math.max(1, h - WINDOW_CHROME_TOTAL);
+    const logStartRow = rowCursor + WINDOW_CHROME_TOP;
+    const logEndRow = logStartRow + logviewHeight - 1;
+    const maxOffset = Math.max(0, logs.length - logviewHeight);
+    const effectiveOffset = Math.min(runtime?.scrollOffset ?? 0, maxOffset);
+    rowCursor += h;
+    return { serviceId: id, logStartRow, logEndRow, effectiveOffset, logCount: logs.length };
+  });
+  return { sidebarWidth, windows };
+}
+
+function copySelection(store: AppStoreApi): void {
+  const state = store.getState();
+  const sel = state.selection;
+  const runtime = sel === null ? undefined : state.services[sel.serviceId];
+  if (sel !== null && runtime !== undefined) {
+    const start = Math.min(sel.anchorLine, sel.headLine);
+    const end = Math.max(sel.anchorLine, sel.headLine);
+    const text = runtime.logs
+      .slice(start, end + 1)
+      .map((l) => l.content)
+      .join('\n');
+    if (text.length > 0) {
+      copyToClipboard(text);
+      notifyTemporarily(store, `Copied ${String(end - start + 1)} lines`);
+    }
+  }
+  store.getState().clearSelection();
+}
+
+function createMouseSelectionHandlers(
+  store: AppStoreApi,
+  scrollRef: React.RefObject<KeyHandlers>,
+): MouseDragHandlers {
+  let dragged = false;
+  return {
+    onDown: (col, row): void => {
+      const hit = hitTestWindow(col, row, buildHitGeometry(store));
+      if (hit === null) {
+        return;
+      }
+      dragged = false;
+      store.getState().startSelection(hit.serviceId, hit.logIndex);
+    },
+    onDrag: (col, row): void => {
+      const sel = store.getState().selection;
+      if (sel === null) {
+        return;
+      }
+      const hit = hitTestWindow(col, row, buildHitGeometry(store));
+      if (hit !== null && hit.serviceId === sel.serviceId) {
+        dragged = true;
+        store.getState().updateSelectionHead(hit.logIndex);
+      }
+    },
+    onUp: (): void => {
+      if (dragged) {
+        copySelection(store);
+      } else {
+        store.getState().clearSelection();
+      }
+      dragged = false;
+    },
+    onScrollUp: (): void => {
+      scrollRef.current.scrollUp();
+    },
+    onScrollDown: (): void => {
+      scrollRef.current.scrollDown();
+    },
+  };
+}
+
+// In-app drag selection only in the sidebar dashboard. Fullscreen/stream
+// disable it so the terminal's own (native) selection works there instead.
+function useMouseSelection(
+  store: AppStoreApi,
+  state: AppState,
+  handlersRef: React.RefObject<KeyHandlers>,
+): void {
+  const mouseHandlers = useMemo(
+    () => createMouseSelectionHandlers(store, handlersRef),
+    [store, handlersRef],
+  );
+  const mouseEnabled =
+    state.mode === 'normal' &&
+    resolveViewMode(state.config.services.length, state.viewMode) === 'sidebar';
+  useMouse(mouseHandlers, mouseEnabled);
 }
 
 function calculateColumns(configColumns: number | 'auto', serviceCount: number): number {
@@ -1478,79 +1912,6 @@ function calculateColumns(configColumns: number | 'auto', serviceCount: number):
     return Math.min(2, serviceCount);
   }
   return Math.min(3, serviceCount);
-}
-
-function getPanelIndexFromClick(col: number, row: number, config: MouseConfig): number | null {
-  const { stdout } = process;
-  const termWidth = stdout.columns;
-  const termHeight = stdout.rows;
-
-  // Header = 3 rows, Footer = 3 rows
-  const headerHeight = 3;
-  const footerHeight = 3;
-  const contentTop = headerHeight;
-  const contentHeight = termHeight - headerHeight - footerHeight;
-
-  if (row <= contentTop || row > contentTop + contentHeight) {
-    return null;
-  }
-
-  const columns = calculateColumns(config.columns, config.serviceCount);
-  const rows = Math.ceil(config.serviceCount / columns);
-  const panelWidth = Math.floor(termWidth / columns);
-  const panelHeight = Math.floor(contentHeight / rows);
-
-  const panelCol = Math.floor((col - 1) / panelWidth);
-  const panelRow = Math.floor((row - contentTop - 1) / panelHeight);
-  const panelIndex = panelRow * columns + panelCol;
-
-  return panelIndex >= 0 && panelIndex < config.serviceCount ? panelIndex : null;
-}
-
-function createMouseHandlers(
-  handlersRef: React.RefObject<KeyHandlers>,
-  config: MouseConfig,
-  store: AppStoreApi,
-): MouseHandlersResult {
-  return {
-    onScrollUp: (): void => {
-      handlersRef.current.scrollUp();
-    },
-    onScrollDown: (): void => {
-      handlersRef.current.scrollDown();
-    },
-    onClick: (col: number, row: number): void => {
-      // Don't change focus in fullscreen mode
-      const currentMode = store.getState().mode;
-      if (currentMode === 'fullscreen') {
-        return;
-      }
-      const panelIndex = getPanelIndexFromClick(col, row, config);
-      if (panelIndex !== null) {
-        handlersRef.current.setFocusedSpace(panelIndex);
-      }
-    },
-  };
-}
-
-function useMouseSupport(
-  state: AppState,
-  handlersRef: React.RefObject<KeyHandlers>,
-  store: AppStoreApi,
-): void {
-  const mouseEnabled = state.mode !== 'help' && state.mode !== 'command';
-  const mouseConfig = useMemo(
-    () => ({
-      serviceCount: state.config.services.length,
-      columns: state.config.global.columns,
-    }),
-    [state.config.services.length, state.config.global.columns],
-  );
-  const mouseHandlers = useMemo(
-    () => createMouseHandlers(handlersRef, mouseConfig, store),
-    [handlersRef, mouseConfig, store],
-  );
-  useMouse(mouseHandlers, mouseEnabled);
 }
 
 function renderScriptOverlays(state: AppState, store: AppStoreApi): React.ReactElement | null {
@@ -1696,8 +2057,11 @@ function renderModeOverlay(
       </Box>
     );
   }
-  if (state.mode === 'fullscreen' || state.mode === 'visual') {
+  if (state.mode === 'fullscreen') {
     return FullscreenView({ state, serviceDisplays });
+  }
+  if (state.mode === 'stream') {
+    return StreamModeView({ state, serviceDisplays });
   }
   const scriptOverlay = renderScriptOverlays(state, store);
   if (scriptOverlay !== null) {
@@ -1731,7 +2095,7 @@ function AppContent({ store, config }: AppContentProps): React.ReactElement {
   );
 
   const scrollCtx = useScrollContext(store, state);
-  const serviceCtx = useServiceContext(state, serviceManager);
+  const serviceCtx = useServiceContext(store, state, serviceManager);
   const scriptsCtx = useScriptsContext(store, state, runScript);
   const handlers = useKeyHandlers(
     actions,
@@ -1756,13 +2120,24 @@ function AppContent({ store, config }: AppContentProps): React.ReactElement {
     dispatchInput(input, key, stateRef.current, handlersRef.current);
   });
 
-  useMouseSupport(state, handlersRef, store);
+  useMouseSelection(store, state, handlersRef);
 
+  return renderAppBody(state, store, serviceDisplays, serviceManager);
+}
+
+function renderAppBody(
+  state: AppState,
+  store: AppStoreApi,
+  serviceDisplays: ServiceDisplay[],
+  serviceManager: UseServiceManagerResult,
+): React.ReactElement {
   const overlay = renderModeOverlay(state, store, serviceDisplays);
   if (overlay !== null) {
     return overlay;
   }
-
+  if (resolveViewMode(state.config.services.length, state.viewMode) === 'sidebar') {
+    return <SidebarView state={state} serviceDisplays={serviceDisplays} />;
+  }
   return (
     <MainView state={state} serviceDisplays={serviceDisplays} serviceManager={serviceManager} />
   );

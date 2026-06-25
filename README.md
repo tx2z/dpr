@@ -14,7 +14,7 @@
 - **Multi-service management** — Run and monitor multiple services in a single terminal
 - **Smart dependencies** — Services wait for their dependencies to be ready before starting
 - **Real-time logs** — View logs with search, scroll, and fullscreen mode
-- **Vim-style navigation** — Keyboard-first design with mouse support
+- **Vim-style navigation** — Keyboard-first design; native terminal text selection for copy/paste
 - **Flexible configuration** — YAML config with auto-start, colors, and custom commands
 - **Log persistence** — Optionally save logs to files for debugging
 
@@ -143,6 +143,31 @@ Available colors: `green`, `blue`, `yellow`, `magenta`, `cyan`, `red`
 | `f` | Enter search mode |
 | `1-9` | Focus service panel by number |
 | `Tab` / `Shift+Tab` | Cycle through panels |
+| `t` | Toggle between grid and sidebar view |
+
+> Projects with more than 6 services always use the sidebar view; the `columns` option is ignored in that case.
+
+### Sidebar View
+
+With more than 6 services (or after pressing `t`), dpr shows a sidebar listing every service and a main area with up to 4 log "windows" stacked full-width.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / arrows | Move the sidebar selection |
+| `Enter` | Show the selected service as the only window |
+| `w` | Add/remove the selected service as a window (max 4) |
+| `Tab` / `Shift+Tab` | Switch the focused window |
+| `[` / `]` | Scroll the focused window up/down a page |
+| `g` / `G` | Scroll the focused window to top/bottom |
+| `c` | Close the focused window |
+| `v` | Stream mode — print this service's logs into native scrollback |
+| `s` / `x` / `K` / `r` / `h` | Service actions on the selected service |
+
+> **Copying log lines:** there are two ways to copy, depending on what you want:
+> - **Drag inside a window (sidebar view):** dpr captures the mouse and highlights the log lines you drag over within that window; releasing copies them to the clipboard (OSC 52). This is line-level and stays inside the window you started in — no bleeding into the sidebar.
+> - **`v` stream mode:** prints the selected service's logs into the terminal's real scrollback (via ink's `<Static>`), exactly like a normal command's output — so you can select character-precise and copy anywhere with your terminal's own selection (`Cmd+C`). Press `q` / `Esc` to return.
+>
+> The `y` / `Y` shortcuts still copy the visible / full log buffer via OSC 52 with no mouse at all.
 
 ### Focused Panel (View Mode)
 

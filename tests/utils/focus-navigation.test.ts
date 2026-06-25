@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateNextFocusIndex,
   calculatePrevFocusIndex,
+  clampListScroll,
   parseNumberKeyFocus,
 } from '../../src/utils/focus-navigation.js';
 
@@ -95,6 +96,28 @@ describe('focus-navigation', () => {
       // doesn't restrict this. parseInt('10') = 10, which is valid for 15 services.
       expect(parseNumberKeyFocus('10', 15)).toBe(9);
       expect(parseNumberKeyFocus('10', 5)).toBeNull(); // 10 > 5, so null
+    });
+  });
+
+  describe('clampListScroll', () => {
+    it('should return 0 when all rows fit', () => {
+      expect(clampListScroll(3, 5, 10)).toBe(0);
+    });
+
+    it('should keep the selection centered when scrolling', () => {
+      expect(clampListScroll(10, 20, 6)).toBe(7);
+    });
+
+    it('should not scroll past the end', () => {
+      expect(clampListScroll(19, 20, 6)).toBe(14);
+    });
+
+    it('should not scroll before the start', () => {
+      expect(clampListScroll(0, 20, 6)).toBe(0);
+    });
+
+    it('should return 0 for non-positive visible rows', () => {
+      expect(clampListScroll(5, 20, 0)).toBe(0);
     });
   });
 });

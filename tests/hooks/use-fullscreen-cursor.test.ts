@@ -144,13 +144,6 @@ describe('fullscreen cursor functionality', () => {
       expect(store.getState().services['api']?.fullscreenCursor).toBe(50);
     });
 
-    it('should persist cursor when entering and exiting visual mode', () => {
-      store.getState().setFullscreenCursor('api', 50);
-      store.getState().enterVisualMode(50);
-      store.getState().exitVisualMode();
-      expect(store.getState().services['api']?.fullscreenCursor).toBe(50);
-    });
-
     it('should not affect cursor when appending new logs', () => {
       store.getState().setFullscreenCursor('api', 50);
       store.getState().appendLog('api', createLogLine('New line'));
@@ -176,37 +169,6 @@ describe('fullscreen cursor functionality', () => {
       store.getState().setFullscreenCursor('web', 75);
       store.getState().setFullscreenCursor('api', 30);
       expect(store.getState().services['web']?.fullscreenCursor).toBe(75);
-    });
-  });
-
-  describe('integration with visual mode', () => {
-    beforeEach(() => {
-      addLogLines(store, 'api', 100);
-    });
-
-    it('should use fullscreen cursor position when entering visual mode', () => {
-      store.getState().setFullscreenCursor('api', 50);
-      store.getState().enterVisualMode(50);
-      expect(store.getState().visualModeState?.selectionStart).toBe(50);
-      expect(store.getState().visualModeState?.cursorLine).toBe(50);
-    });
-
-    it('should preserve fullscreen cursor after visual mode selection', () => {
-      store.getState().setFullscreenCursor('api', 50);
-      store.getState().enterVisualMode(50);
-      store.getState().moveVisualCursor(60); // extend selection
-      store.getState().exitVisualMode();
-      // Fullscreen cursor should still be at 50 (unchanged)
-      expect(store.getState().services['api']?.fullscreenCursor).toBe(50);
-    });
-
-    it('visual mode cursor is independent from fullscreen cursor', () => {
-      store.getState().setFullscreenCursor('api', 50);
-      store.getState().enterVisualMode(50);
-      store.getState().moveVisualCursor(60);
-      // Visual cursor moved, but fullscreen cursor unchanged
-      expect(store.getState().visualModeState?.cursorLine).toBe(60);
-      expect(store.getState().services['api']?.fullscreenCursor).toBe(50);
     });
   });
 
@@ -315,77 +277,5 @@ describe('fullscreen cursor functionality', () => {
       expect(runtime?.logs.length).toBe(100);
       expect(runtime?.fullscreenCursor).toBe(50);
     });
-  });
-});
-
-describe('visual mode with fullscreen cursor', () => {
-  let store: AppStoreApi;
-
-  beforeEach(() => {
-    store = createAppStore(createTestConfig());
-    addLogLines(store, 'api', 100);
-  });
-
-  it('should start visual selection from fullscreen cursor position', () => {
-    store.getState().setFullscreenCursor('api', 30);
-    store.getState().enterVisualMode(30);
-
-    expect(store.getState().visualModeState).toEqual({
-      cursorLine: 30,
-      selectionStart: 30,
-    });
-  });
-
-  it('should allow extending selection downward from cursor', () => {
-    store.getState().setFullscreenCursor('api', 30);
-    store.getState().enterVisualMode(30);
-    store.getState().moveVisualCursor(40);
-
-    expect(store.getState().visualModeState?.selectionStart).toBe(30);
-    expect(store.getState().visualModeState?.cursorLine).toBe(40);
-  });
-
-  it('should allow extending selection upward from cursor', () => {
-    store.getState().setFullscreenCursor('api', 30);
-    store.getState().enterVisualMode(30);
-    store.getState().moveVisualCursor(20);
-
-    expect(store.getState().visualModeState?.selectionStart).toBe(30);
-    expect(store.getState().visualModeState?.cursorLine).toBe(20);
-  });
-
-  it('should return to fullscreen mode when exiting visual mode', () => {
-    store.getState().setMode('fullscreen');
-    store.getState().setFullscreenCursor('api', 30);
-    store.getState().enterVisualMode(30);
-
-    expect(store.getState().mode).toBe('visual');
-
-    store.getState().exitVisualMode();
-
-    expect(store.getState().mode).toBe('fullscreen');
-    expect(store.getState().visualModeState).toBeNull();
-  });
-
-  it('should support selection from middle of logs', () => {
-    store.getState().setFullscreenCursor('api', 50);
-    store.getState().enterVisualMode(50);
-    store.getState().moveVisualCursor(55);
-
-    const visualState = store.getState().visualModeState;
-    expect(visualState?.selectionStart).toBe(50);
-    expect(visualState?.cursorLine).toBe(55);
-    // Selection covers lines 50-55 (6 lines)
-  });
-
-  it('should support reverse selection (cursor above start)', () => {
-    store.getState().setFullscreenCursor('api', 50);
-    store.getState().enterVisualMode(50);
-    store.getState().moveVisualCursor(45);
-
-    const visualState = store.getState().visualModeState;
-    expect(visualState?.selectionStart).toBe(50);
-    expect(visualState?.cursorLine).toBe(45);
-    // Selection covers lines 45-50 (6 lines)
   });
 });

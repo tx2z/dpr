@@ -181,10 +181,10 @@ describe('store actions', () => {
       expect(store.getState().services['api']?.logs).toHaveLength(0);
     });
 
-    it('should reset scroll offset', () => {
+    it('should reset scroll offset to follow the tail', () => {
       store.getState().setScrollOffset('api', 10);
       store.getState().clearLogs('api');
-      expect(store.getState().services['api']?.scrollOffset).toBe(0);
+      expect(store.getState().services['api']?.scrollOffset).toBe(Number.MAX_SAFE_INTEGER);
     });
   });
 
@@ -259,52 +259,66 @@ describe('store actions', () => {
     });
   });
 
-  describe('visual mode actions', () => {
-    describe('enterVisualMode', () => {
-      it('should set mode to visual', () => {
-        store.getState().enterVisualMode(5);
-        expect(store.getState().mode).toBe('visual');
-      });
+  describe('sidebar actions', () => {
+    it('should initialize viewMode to grid for few services', () => {
+      expect(store.getState().viewMode).toBe('grid');
+    });
 
-      it('should initialize visualModeState', () => {
-        store.getState().enterVisualMode(5);
-        expect(store.getState().visualModeState).toEqual({
-          cursorLine: 5,
-          selectionStart: 5,
-        });
+    it('should open the first service as a window initially', () => {
+      expect(store.getState().sidebarState.openWindowIds).toEqual(['api']);
+    });
+
+    describe('setSidebarSelection', () => {
+      it('should clamp selection within range', () => {
+        store.getState().setSidebarSelection(5);
+        expect(store.getState().sidebarState.selectedIndex).toBe(1);
+        store.getState().setSidebarSelection(-3);
+        expect(store.getState().sidebarState.selectedIndex).toBe(0);
       });
     });
 
-    describe('exitVisualMode', () => {
-      it('should set mode to fullscreen', () => {
-        store.getState().enterVisualMode(5);
-        store.getState().exitVisualMode();
-        expect(store.getState().mode).toBe('fullscreen');
-      });
-
-      it('should clear visualModeState', () => {
-        store.getState().enterVisualMode(5);
-        store.getState().exitVisualMode();
-        expect(store.getState().visualModeState).toBeNull();
+    describe('openSidebarWindow', () => {
+      it('should replace windows with the given service', () => {
+        store.getState().openSidebarWindow('web');
+        expect(store.getState().sidebarState.openWindowIds).toEqual(['web']);
+        expect(store.getState().sidebarState.focusedWindowIndex).toBe(0);
       });
     });
 
-    describe('moveVisualCursor', () => {
-      it('should update cursor line', () => {
-        store.getState().enterVisualMode(5);
-        store.getState().moveVisualCursor(10);
-        expect(store.getState().visualModeState?.cursorLine).toBe(10);
+    describe('toggleSidebarWindow', () => {
+      it('should add a window when not open', () => {
+        store.getState().toggleSidebarWindow('web');
+        expect(store.getState().sidebarState.openWindowIds).toContain('web');
       });
 
-      it('should preserve selection start', () => {
-        store.getState().enterVisualMode(5);
-        store.getState().moveVisualCursor(10);
-        expect(store.getState().visualModeState?.selectionStart).toBe(5);
+      it('should remove a window when already open', () => {
+        store.getState().toggleSidebarWindow('api');
+        expect(store.getState().sidebarState.openWindowIds).not.toContain('api');
       });
+    });
 
-      it('should do nothing when not in visual mode', () => {
-        store.getState().moveVisualCursor(10);
-        expect(store.getState().visualModeState).toBeNull();
+    describe('setFocusedWindow', () => {
+      it('should clamp focus to open window range', () => {
+        store.getState().toggleSidebarWindow('web');
+        store.getState().setFocusedWindow(5);
+        expect(store.getState().sidebarState.focusedWindowIndex).toBe(1);
+      });
+    });
+
+    describe('closeFocusedWindow', () => {
+      it('should remove the focused window and clamp focus', () => {
+        store.getState().toggleSidebarWindow('web');
+        store.getState().setFocusedWindow(1);
+        store.getState().closeFocusedWindow();
+        expect(store.getState().sidebarState.openWindowIds).toEqual(['api']);
+        expect(store.getState().sidebarState.focusedWindowIndex).toBe(0);
+      });
+    });
+
+    describe('setViewMode', () => {
+      it('should switch the view mode', () => {
+        store.getState().setViewMode('sidebar');
+        expect(store.getState().viewMode).toBe('sidebar');
       });
     });
   });
@@ -376,5 +390,49 @@ describe('store actions', () => {
       expect(store.getState().services['api']?.fullscreenCursor).toBeNull();
       expect(store.getState().services['web']?.fullscreenCursor).toBeNull();
     });
+  });
+});
+
+const createManyServicesConfig = (count: number): Config => ({
+  global: { name: 'Many', columns: 'auto', logs: false, logsDir: '~/.dpr/logs' },
+  services: Array.from({ length: count }, (_, i) => ({
+    id: `svc-${String(i)}`,
+    name: `Service ${String(i)}`,
+    dir: '.',
+    start: 'npm start',
+    stop: null,
+    autostart: false,
+    color: 'green' as const,
+    logs: false,
+    env: {},
+    dependsOn: [],
+    readyPattern: null,
+    readyDelay: 500,
+    scripts: [],
+    runOnce: false,
+    keepRunning: false,
+  })),
+});
+
+describe('sidebar window cap and auto view mode', () => {
+  it('should force sidebar view mode above the threshold', () => {
+    const store = createAppStore(createManyServicesConfig(7));
+    expect(store.getState().viewMode).toBe('sidebar');
+  });
+
+  it('should default to grid at or below the threshold', () => {
+    const store = createAppStore(createManyServicesConfig(6));
+    expect(store.getState().viewMode).toBe('grid');
+  });
+
+  it('should not open more than 4 windows', () => {
+    const store = createAppStore(createManyServicesConfig(8));
+    // svc-0 is open initially; add 3 more to reach 4, then the 5th is ignored
+    store.getState().toggleSidebarWindow('svc-1');
+    store.getState().toggleSidebarWindow('svc-2');
+    store.getState().toggleSidebarWindow('svc-3');
+    store.getState().toggleSidebarWindow('svc-4');
+    expect(store.getState().sidebarState.openWindowIds).toHaveLength(4);
+    expect(store.getState().sidebarState.openWindowIds).not.toContain('svc-4');
   });
 });
