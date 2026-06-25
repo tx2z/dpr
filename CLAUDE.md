@@ -26,27 +26,38 @@ src/
 │   ├── loader.ts      # YAML config loader
 │   └── dependencies.ts # Dependency graph & topological sort
 ├── store/             # Zustand state management
-│   └── app-store.ts   # App state, services, UI state
+│   └── app-store.ts   # App state, services, view/sidebar/selection state
 ├── components/        # React/ink components
-│   ├── layout.tsx     # Responsive grid layout
-│   ├── space.tsx      # Service panel
+│   ├── layout.tsx     # Responsive grid layout (grid view)
+│   ├── space.tsx      # Service panel (grid cell)
+│   ├── sidebar.tsx    # Service list for the sidebar view
+│   ├── main-area.tsx  # Stacks up to 4 WindowPanes (sidebar view)
+│   ├── window-pane.tsx # Single log window in the main area
+│   ├── stream-view.tsx # Single service via <Static> (native scrollback copy)
+│   ├── fullscreen-overlay.tsx # Single-service zoom with vim cursor
 │   ├── header.tsx     # Project header
-│   ├── footer.tsx     # Status bar
-│   ├── log-view.tsx   # Log display with highlighting
+│   ├── footer.tsx     # Status bar / contextual key hints
+│   ├── log-view.tsx   # Log display with search + selection highlighting
 │   └── button.tsx     # Clickable button
 ├── hooks/             # React hooks
 │   ├── use-commands.ts      # Command parsing/execution
 │   ├── use-search.ts        # Search functionality
 │   ├── use-service-manager.ts # Service lifecycle
-│   └── use-process.ts       # Process spawning
+│   ├── use-process.ts       # Process spawning
+│   └── use-mouse.ts         # Mouse tracking (drag select + wheel, mode 1002)
 ├── services/          # Non-React services
 │   └── process-manager.ts   # Child process management
 └── utils/             # Utilities
-    └── file-logger.ts # Log file persistence
+    ├── file-logger.ts       # Log file persistence
+    ├── focus-navigation.ts  # Focus cycling + clampListScroll
+    ├── status.ts            # Service status label/glyph helpers
+    └── window-hit-test.ts   # Map mouse (col,row) -> window log line
 
 tests/                 # Test files mirror src/ structure
 example/
-└── dpr.yaml          # Example configuration
+├── dpr.yaml           # Example configuration
+├── dpr-grid-4.yaml    # 4 services (grid view)
+└── dpr-sidebar-8.yaml # 8 services (sidebar view)
 ```
 
 ## Key Commands
@@ -72,8 +83,24 @@ npm run dev        # Development mode with tsx
 
 ### State Management
 - Single Zustand store (`createAppStore`) holds all app state
-- Services stored as `Record<string, ServiceRuntime>`
+- Services stored as `Record<string, ServiceRuntime>` (`{ state, logs, scrollOffset, fullscreenCursor, appendSeq }`)
 - UI state: mode, focusedSpaceIndex, commandInput, searchState
+- `viewMode: 'grid' | 'sidebar'` + `sidebarState` (`selectedIndex`, `openWindowIds` (max 4), `focusedWindowIndex`)
+- `selection: { serviceId, anchorLine, headLine } | null` for in-app mouse drag selection
+- `appendSeq` is a monotonic per-service line counter so the stream view detects new lines even after the 1000-line buffer trims
+- `scrollOffset === Number.MAX_SAFE_INTEGER` is the "follow the tail" sentinel; `appendLog` only auto-scrolls when already following
+
+### Views (grid vs sidebar)
+- **Grid** (`MainView` + `Layout`): the default for ≤6 services; column grid of `Space` panels
+- **Sidebar** (`SidebarView` + `Sidebar` + `MainArea`): service list on the left, up to 4 full-width stacked `WindowPane`s on the right
+- `resolveViewMode(serviceCount, current)`: forces sidebar when serviceCount > `SIDEBAR_AUTO_THRESHOLD` (6); otherwise uses `viewMode`. `t` toggles when not forced. Used by both render and input dispatch so they agree.
+- Layouts leave one row of headroom (never fill the terminal exactly) — a full-height ink frame triggers full-screen repaint flicker.
+
+### Log selection & copy
+- **Grid**: no mouse capture, so the terminal's native selection works; copy with the terminal (e.g. Cmd+C)
+- **Sidebar**: `use-mouse` captures drag (SGR mode 1002); `window-hit-test` maps coords to a log line; dragging selects lines, release copies via OSC 52 (`utils/clipboard.ts`)
+- **Stream view** (`v`): renders one service's logs through ink `<Static>` into native scrollback for stable, character-precise selection
+- `y` / `Y` copy visible / full buffer via OSC 52 with no mouse
 
 ### Process Management
 - `ProcessManager` uses EventEmitter pattern for status/log events
@@ -87,9 +114,10 @@ npm run dev        # Development mode with tsx
 - Services wait in WAITING state until dependencies are READY
 
 ### Input Handling
-- Three modes: normal, command, search
-- Input dispatched based on current mode
-- Vim-style navigation (j/k/g/G) for scrolling
+- Modes (`AppMode`): normal, command, search, help, fullscreen, stream, scripts, scriptOutput, scriptHistory
+- `dispatchInput` routes per mode (`dispatchEditModes` / `dispatchViewModes`); in `normal` it branches grid vs sidebar via `resolveViewMode`
+- Vim-style navigation (j/k/g/G) for scrolling; sidebar uses j/k for list selection and `[` `]` for window scroll
+- View-aware target resolvers: `resolveActionServiceId` (service actions → selected/focused) and `resolveScrollServiceId` (scroll/copy → focused window)
 
 ## Service States
 
@@ -103,9 +131,11 @@ READY → STOPPING → STOPPED
 
 ## Config Schema
 
+# Up to MAX_SERVICES (20) services. With >6 the sidebar view is forced and
+# `columns` is ignored. `columns` is capped at MAX_COLUMNS (6).
 ```yaml
 name: string          # Project name
-columns: auto | 1-6   # Panel columns
+columns: auto | 1-6   # Panel columns (grid view only)
 logs: boolean         # Enable file logging
 logsDir: string       # Log directory path
 
@@ -129,8 +159,9 @@ services:
 
 - Tests in `tests/` directory, mirroring `src/` structure
 - Use `describe`/`it` from Vitest
-- Component tests use ink-testing-library
-- 60+ tests covering config, store, dependencies, utils
+- Component tests use ink-testing-library; `tests/app.smoke.test.tsx` renders the App in both views
+- Pure geometry/logic helpers are unit-tested directly (`window-hit-test`, `computeWindowRows`, `clampListScroll`, sidebar store actions)
+- 150+ tests covering config, store, dependencies, utils, components
 
 ## Common Tasks
 
@@ -146,6 +177,12 @@ services:
 4. Update tests
 
 ### Adding keyboard shortcut
-1. Add handler in `handleNormalModeInput` (src/app.tsx)
-2. If complex, extract to helper function to stay under complexity limit
-3. Update README keyboard shortcuts table
+1. Add a handler to `KeyHandlers` and the relevant factory in `src/app.tsx`
+2. Wire the key in `handleNormalModeInput` (grid) and/or `handleSidebarNormalInput` (sidebar)
+3. If complex, extract to a helper to stay under the complexity limit
+4. Update the footer hints (`src/components/footer.tsx`), help overlay, and README
+
+### Adding a new view/overlay mode
+1. Add the mode to `AppMode` (src/store/app-store.ts)
+2. Handle its input in `dispatchEditModes`/`dispatchViewModes` (src/app.tsx)
+3. Render it in `renderModeOverlay` / `renderAppBody`
