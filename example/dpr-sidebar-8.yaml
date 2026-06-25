@@ -1,0 +1,88 @@
+name: "8-Service Sidebar Test"
+columns: auto
+logs: true
+logsDir: ~/.dpr/logs
+
+services:
+  # Streams a numbered heartbeat every second so you can verify scroll position
+  # and text selection precisely. Has scripts to test the scripts menu (r).
+  - id: api
+    name: "API Server"
+    start: "echo 'Starting API...' && sleep 1 && echo 'API ready!' && i=0; while true; do i=$((i+1)); echo \"api log line $i\"; sleep 1; done"
+    autostart: true
+    color: green
+    readyPattern: "API ready!"
+    scripts:
+      - id: health
+        name: "Health Check"
+        command: "echo 'Checking API health...' && sleep 0.5 && echo 'API is healthy!'"
+        key: c
+      - id: reset
+        name: "Reset API State"
+        command: "echo 'Resetting API state...' && sleep 1 && echo 'API state reset complete'"
+        key: r
+
+  # Depends on api -> stays in WAITING until api is READY (test dependency order).
+  - id: web
+    name: "Web Frontend"
+    start: "echo 'Starting Web...' && sleep 1 && echo 'Web ready!' && i=0; while true; do i=$((i+1)); echo \"web request handled #$i\"; sleep 1; done"
+    autostart: true
+    color: blue
+    readyPattern: "Web ready!"
+    dependsOn:
+      - api
+
+  # Steady output -> plenty of numbered lines to test scrolling and selection.
+  - id: cache
+    name: "Cache Layer"
+    start: "echo 'Cache ready!' && i=0; while true; do i=$((i+1)); echo \"cache hit key=$i ratio=0.9$i\"; sleep 1; done"
+    autostart: true
+    color: cyan
+    readyPattern: "Cache ready!"
+
+  # Database with a slower ready pattern.
+  - id: db
+    name: "Database"
+    start: "echo 'Booting db...' && sleep 2 && echo 'DB ready!' && i=0; while true; do i=$((i+1)); echo \"db query executed $i (12ms)\"; sleep 2; done"
+    autostart: true
+    color: magenta
+    readyPattern: "DB ready!"
+
+  # Worker with a parameterized script (test param collection in scripts menu).
+  - id: worker
+    name: "Background Worker"
+    start: "echo 'Worker ready!' && i=0; while true; do i=$((i+1)); echo \"worker processing job $i\"; sleep 1.5; done"
+    autostart: true
+    color: yellow
+    readyPattern: "Worker ready!"
+    scripts:
+      - id: process-job
+        name: "Process Single Job"
+        command: "echo 'Processing job {jobId}...' && sleep 1 && echo 'Job {jobId} complete!'"
+        key: p
+        params:
+          - id: jobId
+            prompt: "Enter job ID"
+
+  # Emits to stderr too (red lines) so you can test stderr coloring + selection.
+  - id: mailer
+    name: "Mail Queue"
+    start: "echo 'Mailer ready!' && i=0; while true; do i=$((i+1)); echo \"sent email batch $i\"; echo \"warn: smtp retry $i\" >&2; sleep 2; done"
+    autostart: true
+    color: red
+    readyPattern: "Mailer ready!"
+
+  # Not autostarted -> stays STOPPED so you can test starting it with 's'.
+  - id: cron
+    name: "Cron Scheduler"
+    start: "echo 'Cron ready!' && i=0; while true; do i=$((i+1)); echo \"cron tick $i\"; sleep 1; done"
+    autostart: false
+    color: green
+    readyPattern: "Cron ready!"
+
+  # Crashes after ~8 lines so you can see the CRASHED state and restart it.
+  - id: flaky
+    name: "Flaky Service"
+    start: "i=0; while [ $i -lt 8 ]; do i=$((i+1)); echo \"flaky working $i\"; sleep 1; done; echo 'fatal: boom' >&2; exit 1"
+    autostart: true
+    color: blue

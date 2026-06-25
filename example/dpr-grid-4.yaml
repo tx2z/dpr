@@ -1,0 +1,44 @@
+name: "4-Service Grid Test"
+columns: 2
+logs: true
+logsDir: ~/.dpr/logs
+
+services:
+  # Numbered heartbeat so you can verify scroll position in a grid panel.
+  - id: api
+    name: "API Server"
+    start: "echo 'Starting API...' && sleep 1 && echo 'API ready!' && i=0; while true; do i=$((i+1)); echo \"api log line $i\"; sleep 1; done"
+    autostart: true
+    color: green
+    readyPattern: "API ready!"
+    scripts:
+      - id: health
+        name: "Health Check"
+        command: "echo 'Checking API health...' && sleep 0.5 && echo 'API is healthy!'"
+        key: c
+
+  # Depends on api -> stays WAITING until api is READY.
+  - id: web
+    name: "Web Frontend"
+    start: "echo 'Starting Web...' && sleep 1 && echo 'Web ready!' && i=0; while true; do i=$((i+1)); echo \"web request #$i\"; sleep 1; done"
+    autostart: true
+    color: blue
+    readyPattern: "Web ready!"
+    dependsOn:
+      - api
+
+  # Emits stderr (red lines) too.
+  - id: worker
+    name: "Background Worker"
+    start: "echo 'Worker ready!' && i=0; while true; do i=$((i+1)); echo \"worker job $i\"; echo \"warn: retry $i\" >&2; sleep 1.5; done"
+    autostart: true
+    color: yellow
+    readyPattern: "Worker ready!"
+
+  # Not autostarted -> STOPPED, so you can start it with focus + [s].
+  - id: cron
+    name: "Cron Scheduler"
+    start: "echo 'Cron ready!' && i=0; while true; do i=$((i+1)); echo \"cron tick $i\"; sleep 1; done"
+    autostart: false
+    color: magenta
+    readyPattern: "Cron ready!"
