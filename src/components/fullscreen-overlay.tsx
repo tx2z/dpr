@@ -19,8 +19,7 @@ export interface FullscreenOverlayProps {
   readonly fullscreenCursor: number | null;
 }
 
-const FOOTER_TEXT =
-  '[↑↓/jk] move cursor · [←→] page · [g/G] top/bottom · [y/Y] copy · [Esc] close';
+const FOOTER_TEXT = '[↑↓/jk] move cursor · [←→] page · [g/G] top/bottom · [y/Y] copy · [Esc] close';
 
 interface HeaderProps {
   readonly config: ServiceConfig;

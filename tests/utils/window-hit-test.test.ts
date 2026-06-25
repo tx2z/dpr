@@ -42,9 +42,7 @@ describe('hitTestWindow', () => {
   it('clamps to the last log when the row exceeds the available lines', () => {
     const shortGeo: HitGeometry = {
       sidebarWidth: 10,
-      windows: [
-        { serviceId: 'x', logStartRow: 5, logEndRow: 9, effectiveOffset: 0, logCount: 2 },
-      ],
+      windows: [{ serviceId: 'x', logStartRow: 5, logEndRow: 9, effectiveOffset: 0, logCount: 2 }],
     };
     expect(hitTestWindow(20, 9, shortGeo)).toEqual({ serviceId: 'x', logIndex: 1 });
   });

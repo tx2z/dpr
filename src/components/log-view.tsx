@@ -148,7 +148,11 @@ const LogLineComponent = React.memo(function LogLineComponent({
   if (isCursor || isSelected) {
     return (
       <Box key={lineIndex} overflowX="hidden">
-        <Text backgroundColor={isCursor ? 'cyan' : 'blue'} color={textColor ?? 'white'} wrap="truncate">
+        <Text
+          backgroundColor={isCursor ? 'cyan' : 'blue'}
+          color={textColor ?? 'white'}
+          wrap="truncate"
+        >
           {isCursor ? '> ' : '  '}
           {content}
         </Text>

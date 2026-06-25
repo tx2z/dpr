@@ -425,9 +425,7 @@ function createScriptExecutionActions(
   };
 }
 
-function createFullscreenCursorActions(
-  set: SetState,
-): Pick<AppActions, 'setFullscreenCursor'> {
+function createFullscreenCursorActions(set: SetState): Pick<AppActions, 'setFullscreenCursor'> {
   return {
     setFullscreenCursor: (serviceId, line): void => {
       set((state) => {
@@ -453,10 +451,7 @@ function clampToRange(index: number, count: number): number {
   return Math.max(0, Math.min(count - 1, index));
 }
 
-function toggleWindowIds(
-  openWindowIds: readonly string[],
-  serviceId: string,
-): readonly string[] {
+function toggleWindowIds(openWindowIds: readonly string[], serviceId: string): readonly string[] {
   if (openWindowIds.includes(serviceId)) {
     return openWindowIds.filter((id) => id !== serviceId);
   }
